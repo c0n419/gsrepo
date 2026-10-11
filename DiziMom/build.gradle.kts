@@ -1,4 +1,4 @@
-version = 67
+version = 68
 
 cloudstream {
     authors = listOf("csprofesor")
@@ -13,6 +13,6 @@ cloudstream {
      * 3: Beta only
     **/
     status  = 1 // will be 3 if unspecified
-    tvTypes = listOf("TvSeries")
-    iconUrl = "https://www.google.com/s2/favicons?domain=www.dizimom.wiki&sz=%size%"
+    tvTypes = listOf("TvSeries", "Movie")
+    iconUrl = "https://www.google.com/s2/favicons?domain=www.dizimom.cafe&sz=%size%"
 }
