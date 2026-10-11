@@ -79,7 +79,11 @@ class SineWix : MainAPI() {
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         val url = "${request.data}/${key}?page=$page"
-        val result = app.get(url, headers = headers).parsedSafe<SineSonuc>()
+        val result = try {
+            app.get(url, headers = headers, timeout = 10).parsedSafe<SineSonuc>()
+        } catch (_: Throwable) {
+            null
+        }
 
         if (result != null && !result.data.isNullOrEmpty()) {
             val home = result.data.mapNotNull { it.toMainPageResult() }
@@ -88,7 +92,7 @@ class SineWix : MainAPI() {
             }
         }
 
-        // Fallback to TMDB API for category pages when SineWix direct API returns empty/error
+        // Fallback to TMDB API for category pages when SineWix direct API returns empty/error/401
         val tmdbUrl = when (request.name) {
             "Top 10 Listesi" -> "${tmdbBaseUrl}/trending/all/day?api_key=${tmdbApiKey}&language=tr-TR&page=$page"
             "Son Eklenen Filmler" -> "${tmdbBaseUrl}/movie/now_playing?api_key=${tmdbApiKey}&language=tr-TR&page=$page"
@@ -100,7 +104,12 @@ class SineWix : MainAPI() {
             else -> "${tmdbBaseUrl}/trending/all/day?api_key=${tmdbApiKey}&language=tr-TR&page=$page"
         }
 
-        val tmdbRes = app.get(tmdbUrl).parsedSafe<TmdbPageResult>()
+        val tmdbRes = try {
+            app.get(tmdbUrl, timeout = 10).parsedSafe<TmdbPageResult>()
+        } catch (_: Throwable) {
+            null
+        }
+
         val items = tmdbRes?.results?.mapNotNull { it.toSearchResponse() } ?: emptyList()
 
         return newHomePageResponse(request.name, items)
@@ -108,7 +117,7 @@ class SineWix : MainAPI() {
 
     private fun SineData.toMainPageResult(): SearchResponse? {
         val title = this.title ?: this.name ?: return null
-        val posterUrl = fixUrl(this.posterPath ?: this.backdropPath)
+        val posterUrl = fixUrl(this.posterPath ?: this.backdropPath) ?: return null
         val score = this.vote
         val href: String
         when (this.type) {
@@ -141,7 +150,7 @@ class SineWix : MainAPI() {
     private fun TmdbItem.toSearchResponse(): SearchResponse? {
         val title = this.title ?: this.name ?: return null
         val id = this.id ?: return null
-        val posterUrl = fixUrl(this.posterPath ?: this.backdropPath)
+        val posterUrl = fixUrl(this.posterPath ?: this.backdropPath) ?: return null
         val score = this.voteAverage
         val isTv = this.mediaType == "tv" || (this.name != null && this.title == null)
 
@@ -161,7 +170,12 @@ class SineWix : MainAPI() {
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
-        val result = app.get("${mainUrl}/search/${query}/${key}", headers = headers).parsedSafe<SineSearch>()
+        val result = try {
+            app.get("${mainUrl}/search/${query}/${key}", headers = headers, timeout = 10).parsedSafe<SineSearch>()
+        } catch (_: Throwable) {
+            null
+        }
+
         if (result != null && !result.search.isNullOrEmpty()) {
             val items = result.search.mapNotNull { it.toMainPageResult() }
             if (items.isNotEmpty()) return items
@@ -169,7 +183,12 @@ class SineWix : MainAPI() {
 
         // Fallback to TMDB Search
         val tmdbUrl = "${tmdbBaseUrl}/search/multi?api_key=${tmdbApiKey}&language=tr-TR&query=${query}"
-        val tmdbRes = app.get(tmdbUrl).parsedSafe<TmdbPageResult>()
+        val tmdbRes = try {
+            app.get(tmdbUrl, timeout = 10).parsedSafe<TmdbPageResult>()
+        } catch (_: Throwable) {
+            null
+        }
+
         return tmdbRes?.results?.mapNotNull { it.toSearchResponse() } ?: emptyList()
     }
 
@@ -193,7 +212,11 @@ class SineWix : MainAPI() {
 
     private suspend fun loadTmdbMovie(id: Int): LoadResponse? {
         val url = "${tmdbBaseUrl}/movie/${id}?api_key=${tmdbApiKey}&language=tr-TR&append_to_response=credits,videos,external_ids"
-        val res = app.get(url).parsedSafe<TmdbMovieDetail>() ?: return null
+        val res = try {
+            app.get(url, timeout = 10).parsedSafe<TmdbMovieDetail>()
+        } catch (_: Throwable) {
+            null
+        } ?: return null
 
         val originalName = res.originalTitle
         val name = res.title ?: ""
@@ -226,7 +249,11 @@ class SineWix : MainAPI() {
 
     private suspend fun loadTmdbTv(id: Int): LoadResponse? {
         val url = "${tmdbBaseUrl}/tv/${id}?api_key=${tmdbApiKey}&language=tr-TR&append_to_response=credits,videos,external_ids"
-        val res = app.get(url).parsedSafe<TmdbTvDetail>() ?: return null
+        val res = try {
+            app.get(url, timeout = 10).parsedSafe<TmdbTvDetail>()
+        } catch (_: Throwable) {
+            null
+        } ?: return null
 
         val originalName = res.originalName ?: ""
         val name = res.name ?: ""
@@ -244,7 +271,11 @@ class SineWix : MainAPI() {
             val seasonNumber = seasonItem.seasonNumber ?: return@forEach
             if (seasonNumber == 0) return@forEach // skip specials
             val seasonUrl = "${tmdbBaseUrl}/tv/${id}/season/${seasonNumber}?api_key=${tmdbApiKey}&language=tr-TR"
-            val seasonDetail = app.get(seasonUrl).parsedSafe<TmdbSeasonDetail>()
+            val seasonDetail = try {
+                app.get(seasonUrl, timeout = 10).parsedSafe<TmdbSeasonDetail>()
+            } catch (_: Throwable) {
+                null
+            }
             seasonDetail?.episodes?.forEach { ep ->
                 val epNumber = ep.episodeNumber ?: return@forEach
                 val epData = "tmdb:$id:$seasonNumber:$epNumber"
@@ -272,7 +303,12 @@ class SineWix : MainAPI() {
     }
 
     private suspend fun movieDetail(url: String): LoadResponse? {
-        val result = app.get(url, headers = headers).parsedSafe<SineMovie>() ?: return null
+        val result = try {
+            app.get(url, headers = headers, timeout = 10).parsedSafe<SineMovie>()
+        } catch (_: Throwable) {
+            null
+        } ?: return null
+
         val originalName = result.originalName
         val name = result.title ?: ""
         val title = if (!originalName.isNullOrBlank() && originalName != name) "$originalName - $name" else name
@@ -306,7 +342,12 @@ class SineWix : MainAPI() {
     }
 
     private suspend fun serieDetail(url: String): LoadResponse? {
-        val result = app.get(url, headers = headers).parsedSafe<SineSerie>() ?: return null
+        val result = try {
+            app.get(url, headers = headers, timeout = 10).parsedSafe<SineSerie>()
+        } catch (_: Throwable) {
+            null
+        } ?: return null
+
         val originalName = result.originalName ?: ""
         val name = result.name ?: ""
         val title = if (originalName.isNotEmpty() && originalName != name) "$originalName - $name" else name
