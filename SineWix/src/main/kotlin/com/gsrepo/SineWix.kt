@@ -54,7 +54,6 @@ class SineWix : MainAPI() {
         "animes" to "Animeler",
     )
 
-    private val key = "9iQNC5HQwPlaFuJDkhncJ5XTJ8feGXOJatAA"
     private val headers = mapOf(
         "signature" to "308202c3308201aba0030201020204075cec01300d06092a864886f70d01010b050030123110300e0603550403130753696e65776978301e1" +
                 "70d3231303932313233333334395a170d3436303931353233333334395a30123110300e0603550403130753696e6577697830820122300d06092a864" +
@@ -183,7 +182,7 @@ class SineWix : MainAPI() {
         val trailerKey = res.videos?.results?.firstOrNull { it.site == "YouTube" }?.key
         val imdbId = res.externalIds?.imdbId
 
-        val streamData = if (!imdbId.isNullOrBlank()) imdbId else "tmdb:$id"
+        val streamData = if (!imdbId.isNullOrBlank()) "https://vidsrc.me/embed/movie/$imdbId" else "https://vidsrc.me/embed/movie/$id"
 
         return newMovieLoadResponse(title, "https://www.themoviedb.org/movie/$id", TvType.Movie, streamData) {
             this.posterUrl = poster
@@ -231,7 +230,8 @@ class SineWix : MainAPI() {
             }
             seasonDetail?.episodes?.forEach { ep ->
                 val epNumber = ep.episodeNumber ?: return@forEach
-                val epData = if (!imdbId.isNullOrBlank()) "$imdbId:$seasonNumber:$epNumber" else "tmdb:$id:$seasonNumber:$epNumber"
+                val epData = if (!imdbId.isNullOrBlank()) "https://vidsrc.me/embed/tv/$imdbId/$seasonNumber/$epNumber"
+                             else "https://vidsrc.me/embed/tv/$id/$seasonNumber/$epNumber"
                 episodes.add(newEpisode(epData) {
                     this.name = ep.name
                     this.season = seasonNumber
@@ -270,7 +270,15 @@ class SineWix : MainAPI() {
         callback: (ExtractorLink) -> Unit
     ): Boolean {
         Log.d("SWX", "data » $data")
-        val cleanData = data.trim()
+        var cleanData = data.trim()
+
+        if (cleanData.contains("/public/api/")) {
+            cleanData = cleanData.substringAfter("/public/api/").trim()
+        } else if (cleanData.startsWith(mainUrl)) {
+            cleanData = cleanData.removePrefix(mainUrl).removePrefix("/").trim()
+        }
+
+        Log.d("SWX", "cleanData » $cleanData")
 
         if (cleanData.contains("snwaxdop")) {
             callback.invoke(
@@ -287,8 +295,33 @@ class SineWix : MainAPI() {
             return true
         }
 
+        if (cleanData.contains("vidsrc.me/embed/")) {
+            val embedUrlMe = cleanData
+            val embedUrlTo = cleanData.replace("vidsrc.me", "vidsrc.to")
+            val embedUrlAuto = if (cleanData.contains("/movie/")) {
+                cleanData.replace("https://vidsrc.me/embed/movie/", "https://autoembed.co/movie/imdb/")
+            } else {
+                val match = Regex("""vidsrc\.me/embed/tv/([^/]+)/(\d+)/(\d+)""").find(cleanData)
+                if (match != null) {
+                    val id = match.groupValues[1]
+                    val s = match.groupValues[2]
+                    val e = match.groupValues[3]
+                    "https://autoembed.co/tv/imdb/$id-$s-$e"
+                } else {
+                    cleanData
+                }
+            }
+
+            listOf(embedUrlMe, embedUrlTo, embedUrlAuto).forEach { embedUrl ->
+                try {
+                    loadExtractor(embedUrl, mainUrl, subtitleCallback, callback)
+                } catch (_: Throwable) {}
+            }
+            return true
+        }
+
         if (cleanData.startsWith("tt")) {
-            // IMDb ID format: "tt1756855" or "tt1756855:1:2"
+            // IMDb ID format: "tt2185037" or "tt2185037:1:2"
             val parts = cleanData.split(":")
             if (parts.size == 1) { // movie
                 val imdbId = parts[0]
