@@ -13,7 +13,7 @@ import okhttp3.Response
 import org.jsoup.Jsoup
 
 class DiziMom : MainAPI() {
-    override var mainUrl              = "https://www.dizimom.wiki"
+    override var mainUrl              = "https://www.dizimom.cafe"
     override var name                 = "DiziMom"
     override val hasMainPage          = true
     override var lang                 = "tr"
@@ -61,24 +61,53 @@ class DiziMom : MainAPI() {
         "${mainUrl}/tum-bolumler"            to "Son Bölümler",
         "${mainUrl}/yerli-dizi-izle"         to "Yerli Diziler",
         "${mainUrl}/yabanci-dizi-izle"       to "Yabancı Diziler",
-        "${mainUrl}/tv-program-bolumleri"    to "TV Programları",
+        "${mainUrl}/tv-programlari-izle"    to "TV Programları",
         "${mainUrl}/netflix-dizileri-izle"   to "Netflix Dizileri",
         "${mainUrl}/kore-dizileri-izle-hd"   to "Kore Dizileri",
         "${mainUrl}/anime-izle"              to "Animeler",
         "${mainUrl}/full-hd-hint-dizileri-izle" to "Hint Dizileri",
+        "${mainUrl}/pakistan-dizileri-izle"  to "Pakistan Dizileri",
+        "${mainUrl}/tum-filmler"             to "Tüm Filmler",
     )
 
+    private fun isRealPosterUrl(url: String?): Boolean {
+        if (url.isNullOrBlank()) return false
+        val clean = url.trim().lowercase()
+        if (clean.startsWith("data:")) return false
+        if (clean.contains("wp-content/themes")) return false
+        if (clean.contains("images/")) return false
+        if (clean.contains("logo")) return false
+        if (clean.contains("gravatar")) return false
+        if (clean.contains("avatar-96")) return false
+        if (clean.contains("avatar-default")) return false
+        return true
+    }
+
     private fun Element.posterUrl(): String? {
-        val img = this.selectFirst("div.img img, div.cat-img img, div.poster img:not(.tipsol), img:not(.tipsol)")
-            ?: this.selectFirst("img")
-            ?: if (this.tagName() == "img") this else return null
-        val url = img.attr("data-src").takeIf { it.isNotBlank() && !it.startsWith("data:") }
-            ?: img.attr("data-lazy-src").takeIf { it.isNotBlank() && !it.startsWith("data:") }
-            ?: img.attr("data-original").takeIf { it.isNotBlank() && !it.startsWith("data:") }
-            ?: img.attr("data-srcset").split(",").firstOrNull()?.trim()?.split(" ")?.firstOrNull()?.takeIf { it.isNotBlank() && !it.startsWith("data:") }
-            ?: img.attr("srcset").split(",").firstOrNull()?.trim()?.split(" ")?.firstOrNull()?.takeIf { it.isNotBlank() && !it.startsWith("data:") }
-            ?: img.attr("src").takeIf { it.isNotBlank() && !it.startsWith("data:") }
-        return fixUrlNull(url)
+        val imgs = this.select("div.category_image img, div.poster img, div.cat-img img, div.img img, noscript img, img")
+        val imageList = if (imgs.isEmpty() && this.tagName() == "img") listOf(this) else imgs
+
+        for (img in imageList) {
+            val dataSrc = img.attr("data-src")
+            if (isRealPosterUrl(dataSrc)) return fixUrlNull(dataSrc)
+
+            val dataLazySrc = img.attr("data-lazy-src")
+            if (isRealPosterUrl(dataLazySrc)) return fixUrlNull(dataLazySrc)
+
+            val dataOriginal = img.attr("data-original")
+            if (isRealPosterUrl(dataOriginal)) return fixUrlNull(dataOriginal)
+
+            val dataSrcset = img.attr("data-srcset").split(",").firstOrNull()?.trim()?.split(" ")?.firstOrNull()
+            if (isRealPosterUrl(dataSrcset)) return fixUrlNull(dataSrcset)
+
+            val srcset = img.attr("srcset").split(",").firstOrNull()?.trim()?.split(" ")?.firstOrNull()
+            if (isRealPosterUrl(srcset)) return fixUrlNull(srcset)
+
+            val src = img.attr("src")
+            if (isRealPosterUrl(src)) return fixUrlNull(src)
+        }
+
+        return null
     }
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
@@ -95,7 +124,7 @@ class DiziMom : MainAPI() {
             return newHomePageResponse(request.name, emptyList())
         }
         
-        val items = document.select("div.episode-box, div.cat-item, div.dizi-box, div.single-item, div.result-item article, div.post-item, article.post")
+        val items = document.select("div.episode-box, div.cat-item, div.dizi-box, div.single-item, div.result-item, div.post-item, article.post, article")
         val home = if (request.data.contains("/tum-bolumler") || request.data.contains("/bolum")) {
             items.mapNotNull { it.sonBolumler() }.ifEmpty { items.mapNotNull { it.diziler() } }
         } else {
