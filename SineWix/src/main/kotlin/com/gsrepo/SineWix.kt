@@ -1,10 +1,6 @@
 package com.gsrepo
 
 import android.util.Log
-import com.fasterxml.jackson.databind.DeserializationFeature
-import com.fasterxml.jackson.databind.ObjectMapper
-import com.fasterxml.jackson.module.kotlin.KotlinModule
-import com.fasterxml.jackson.module.kotlin.readValue
 import com.lagradost.cloudstream3.Actor
 import com.lagradost.cloudstream3.Episode
 import com.lagradost.cloudstream3.HomePageResponse
@@ -69,10 +65,8 @@ class SineWix : MainAPI() {
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         val url = "${request.data}/${key}?page=$page"
-        val document = app.get(url, headers = headers).document
-        val objectMapper = ObjectMapper().registerModule(KotlinModule.Builder().build())
-        objectMapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
-        val result: SineSonuc = objectMapper.readValue(document.body().text())
+        val result = app.get(url, headers = headers).parsedSafe<SineSonuc>()
+            ?: return newHomePageResponse(request.name, emptyList())
 
         val home = result.data.mapNotNull { it.toMainPageResult() }
 
@@ -80,14 +74,14 @@ class SineWix : MainAPI() {
     }
 
     private fun SineData.toMainPageResult(): SearchResponse? {
-        val title = this.title ?: this.name
+        val title = this.title ?: this.name ?: return null
         val posterUrl = this.posterPath
         val score = this.vote
         val href: String
         when (this.type) {
             "movie" -> {
                 href = "${mainUrl}/media/detail/${this.id}/${key}"
-                return newMovieSearchResponse(title!!, href, TvType.Movie) {
+                return newMovieSearchResponse(title, href, TvType.Movie) {
                     this.posterUrl = posterUrl
                     this.score = Score.from10(score)
                 }
@@ -95,7 +89,7 @@ class SineWix : MainAPI() {
 
             "serie" -> {
                 href = "${mainUrl}/series/show/${this.id}/${key}"
-                return newTvSeriesSearchResponse(title!!, href, TvType.TvSeries) {
+                return newTvSeriesSearchResponse(title, href, TvType.TvSeries) {
                     this.posterUrl = posterUrl
                     this.score = Score.from10(score)
                 }
@@ -103,7 +97,7 @@ class SineWix : MainAPI() {
 
             else -> {
                 href = "${mainUrl}/animes/show/${this.id}/${key}"
-                return newAnimeSearchResponse(title!!, href, TvType.Anime) {
+                return newAnimeSearchResponse(title, href, TvType.Anime) {
                     this.posterUrl = posterUrl
                     this.score = Score.from10(score)
                 }
@@ -112,14 +106,11 @@ class SineWix : MainAPI() {
     }
 
     override suspend fun search(query: String): List<SearchResponse>? {
-        val document = app.get("${mainUrl}/search/${query}/${key}", headers = headers).document
-        val objectMapper = ObjectMapper().registerModule(KotlinModule.Builder().build())
-        objectMapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
-        val result: SineSearch = objectMapper.readValue(document.body().text())
+        val result = app.get("${mainUrl}/search/${query}/${key}", headers = headers).parsedSafe<SineSearch>()
+            ?: return emptyList()
 
         return result.search?.mapNotNull { it.toMainPageResult() }
     }
-
 
     override suspend fun quickSearch(query: String): List<SearchResponse>? = search(query)
 
@@ -132,64 +123,61 @@ class SineWix : MainAPI() {
     }
 
     private suspend fun movieDetail(url: String): LoadResponse? {
-        val document = app.get(url, headers = headers).document
-        val objectMapper = ObjectMapper().registerModule(KotlinModule.Builder().build())
-        objectMapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
-        val result: SineMovie = objectMapper.readValue(document.body().text())
+        val result = app.get(url, headers = headers).parsedSafe<SineMovie>() ?: return null
         val originalName = result.originalName
-        val name = result.title
-        val title = "$originalName - $name"
-        val poster = result.backdropPath
+        val name = result.title ?: ""
+        val title = if (!originalName.isNullOrBlank() && originalName != name) "$originalName - $name" else name
+        val poster = result.backdropPath ?: result.posterPath
         val description = result.overview
-        val year = result.releaseDate?.split("-")?.first()?.toIntOrNull()
-        val tags = result.genres?.map { it.name }
+        val year = result.releaseDate?.split("-")?.firstOrNull()?.toIntOrNull()
+        val tags = result.genres?.mapNotNull { it.name }
         val rating = result.vote
-        val duration = result.runtime?.toInt()
-        val actors = result.cast?.map { Actor(it.name!!, it.profilePath) }
+        val duration = result.runtime?.toIntOrNull()
+        val actors = result.cast?.mapNotNull { if (it.name != null) Actor(it.name, it.profilePath) else null }
         val trailer = result.trailer
+        val videoUrl = result.videos?.firstOrNull()?.link ?: url
 
         return newMovieLoadResponse(
             title,
-            result.videos?.get(0)?.link!!,
+            url,
             TvType.Movie,
-            result.videos[0].link!!
+            videoUrl
         ) {
             this.posterUrl = poster
             this.plot = description
             this.year = year
-            this.tags = tags as List<String>?
+            this.tags = tags
             this.score = Score.from10(rating)
             this.duration = duration
             addActors(actors)
-            addTrailer("https://www.youtube.com/embed/${trailer}")
+            if (!trailer.isNullOrBlank()) {
+                addTrailer("https://www.youtube.com/embed/${trailer}")
+            }
         }
     }
 
     private suspend fun serieDetail(url: String): LoadResponse? {
-        val document = app.get(url, headers = headers).document
-        val objectMapper = ObjectMapper().registerModule(KotlinModule.Builder().build())
-        objectMapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
-        val result: SineSerie = objectMapper.readValue(document.body().text())
+        val result = app.get(url, headers = headers).parsedSafe<SineSerie>() ?: return null
         val originalName = result.originalName ?: ""
         val name = result.name ?: ""
-        val title = "$originalName - $name"
-        val poster = result.backdropPath
+        val title = if (originalName.isNotEmpty() && originalName != name) "$originalName - $name" else name
+        val poster = result.backdropPath ?: result.posterPath
         val description = result.overview
-        val year = result.releaseDate?.split("-")?.first()?.toIntOrNull()
-        val tags = result.genres?.map { it }
+        val year = result.releaseDate?.split("-")?.firstOrNull()?.toIntOrNull()
+        val tags = result.genres
         val rating = result.vote
-        val actors = result.cast?.map { Actor(it.name!!, it.profilePath) }
+        val actors = result.cast?.mapNotNull { if (it.name != null) Actor(it.name, it.profilePath) else null }
         val trailer = result.trailer
 
         val episodes = mutableListOf<Episode>()
-        result.seasons?.forEach {
-            val seasonNumber = it.seasonNumber
+        result.seasons?.forEach { seasonItem ->
+            val seasonNumber = seasonItem.seasonNumber
             Log.d("SWX", "seasonNumber » $seasonNumber")
-            it.episodes?.forEach { ep ->
+            seasonItem.episodes?.forEach { ep ->
                 Log.d("SWX", "ep » $ep")
-                if (!ep.videos.isNullOrEmpty()) {
-                    val sineVideo = ep.videos[0]
-                    episodes.add(newEpisode(sineVideo.link) {
+                val videoLink = ep.videos?.firstOrNull()?.link
+                if (!videoLink.isNullOrBlank()) {
+                    episodes.add(newEpisode(videoLink) {
                         this.name = ep.name
                         this.season = seasonNumber
                         this.episode = ep.episodeNumber
@@ -207,7 +195,9 @@ class SineWix : MainAPI() {
                 this.tags = tags
                 this.score = Score.from10(rating)
                 addActors(actors)
-                addTrailer(trailer)
+                if (!trailer.isNullOrBlank()) {
+                    addTrailer(trailer)
+                }
             }
         } else {
             return newTvSeriesLoadResponse(title.trim(), url, TvType.Anime, episodes) {
@@ -217,7 +207,9 @@ class SineWix : MainAPI() {
                 this.tags = tags
                 this.score = Score.from10(rating)
                 addActors(actors)
-                addTrailer(trailer)
+                if (!trailer.isNullOrBlank()) {
+                    addTrailer(trailer)
+                }
             }
         }
     }
