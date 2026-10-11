@@ -15,7 +15,6 @@ import com.lagradost.cloudstream3.SubtitleFile
 import com.lagradost.cloudstream3.TvType
 import com.lagradost.cloudstream3.app
 import com.lagradost.cloudstream3.mainPageOf
-import com.lagradost.cloudstream3.newAnimeSearchResponse
 import com.lagradost.cloudstream3.newEpisode
 import com.lagradost.cloudstream3.newHomePageResponse
 import com.lagradost.cloudstream3.newMovieLoadResponse
@@ -108,38 +107,6 @@ class SineWix : MainAPI() {
         return newHomePageResponse(request.name, items)
     }
 
-    private fun SineData.toMainPageResult(): SearchResponse? {
-        val title = this.title ?: this.name ?: return null
-        val posterUrl = fixUrl(this.posterPath ?: this.backdropPath) ?: return null
-        val score = this.vote
-        val href: String
-        when (this.type) {
-            "movie" -> {
-                href = "${mainUrl}/media/detail/${this.id}/${key}"
-                return newMovieSearchResponse(title, href, TvType.Movie) {
-                    this.posterUrl = posterUrl
-                    this.score = Score.from10(score)
-                }
-            }
-
-            "serie" -> {
-                href = "${mainUrl}/series/show/${this.id}/${key}"
-                return newTvSeriesSearchResponse(title, href, TvType.TvSeries) {
-                    this.posterUrl = posterUrl
-                    this.score = Score.from10(score)
-                }
-            }
-
-            else -> {
-                href = "${mainUrl}/animes/show/${this.id}/${key}"
-                return newAnimeSearchResponse(title, href, TvType.Anime) {
-                    this.posterUrl = posterUrl
-                    this.score = Score.from10(score)
-                }
-            }
-        }
-    }
-
     private fun TmdbItem.toSearchResponse(): SearchResponse? {
         val title = this.title ?: this.name ?: return null
         val id = this.id ?: return null
@@ -148,13 +115,13 @@ class SineWix : MainAPI() {
         val isTv = this.mediaType == "tv" || (this.name != null && this.title == null)
 
         if (isTv) {
-            val href = "tmdb://tv/$id"
+            val href = "https://www.themoviedb.org/tv/$id"
             return newTvSeriesSearchResponse(title, href, TvType.TvSeries) {
                 this.posterUrl = posterUrl
                 this.score = Score.from10(score)
             }
         } else {
-            val href = "tmdb://movie/$id"
+            val href = "https://www.themoviedb.org/movie/$id"
             return newMovieSearchResponse(title, href, TvType.Movie) {
                 this.posterUrl = posterUrl
                 this.score = Score.from10(score)
@@ -176,22 +143,20 @@ class SineWix : MainAPI() {
     override suspend fun quickSearch(query: String): List<SearchResponse> = search(query)
 
     override suspend fun load(url: String): LoadResponse? {
-        val movieMatch = Regex("""tmdb://movie/(\d+)""").find(url) ?: Regex("""/media/detail/(\d+)""").find(url)
-        if (movieMatch != null) {
-            val id = movieMatch.groupValues[1].toIntOrNull()
+        if (url.contains("/movie/")) {
+            val id = url.substringAfter("/movie/").substringBefore("/").substringBefore("?").toIntOrNull()
             if (id != null) return loadTmdbMovie(id)
         }
 
-        val tvMatch = Regex("""tmdb://tv/(\d+)""").find(url) ?: Regex("""/(?:series|animes)/show/(\d+)""").find(url)
-        if (tvMatch != null) {
-            val id = tvMatch.groupValues[1].toIntOrNull()
+        if (url.contains("/tv/") || url.contains("/series/") || url.contains("/animes/")) {
+            val id = (if (url.contains("/series/show/")) url.substringAfter("/series/show/")
+                     else if (url.contains("/animes/show/")) url.substringAfter("/animes/show/")
+                     else url.substringAfter("/tv/")).substringBefore("/").substringBefore("?").toIntOrNull()
             if (id != null) return loadTmdbTv(id)
         }
 
         if (url.contains("/media/detail/")) {
             return movieDetail(url)
-        } else if (url.contains("/series/show/") || url.contains("/animes/show/")) {
-            return serieDetail(url)
         }
 
         return null
@@ -218,9 +183,9 @@ class SineWix : MainAPI() {
         val trailerKey = res.videos?.results?.firstOrNull { it.site == "YouTube" }?.key
         val imdbId = res.externalIds?.imdbId
 
-        val streamData = imdbId ?: "tmdb:$id"
+        val streamData = if (!imdbId.isNullOrBlank()) imdbId else "tmdb:$id"
 
-        return newMovieLoadResponse(title, "tmdb://movie/$id", TvType.Movie, streamData) {
+        return newMovieLoadResponse(title, "https://www.themoviedb.org/movie/$id", TvType.Movie, streamData) {
             this.posterUrl = poster
             this.plot = description
             this.year = year
@@ -252,6 +217,7 @@ class SineWix : MainAPI() {
         val rating = res.voteAverage
         val actors = res.credits?.cast?.mapNotNull { if (it.name != null) Actor(it.name, fixUrl(it.profilePath)) else null }
         val trailerKey = res.videos?.results?.firstOrNull { it.site == "YouTube" }?.key
+        val imdbId = res.externalIds?.imdbId
 
         val episodes = mutableListOf<Episode>()
         res.seasons?.forEach { seasonItem ->
@@ -265,7 +231,7 @@ class SineWix : MainAPI() {
             }
             seasonDetail?.episodes?.forEach { ep ->
                 val epNumber = ep.episodeNumber ?: return@forEach
-                val epData = "tmdb:$id:$seasonNumber:$epNumber"
+                val epData = if (!imdbId.isNullOrBlank()) "$imdbId:$seasonNumber:$epNumber" else "tmdb:$id:$seasonNumber:$epNumber"
                 episodes.add(newEpisode(epData) {
                     this.name = ep.name
                     this.season = seasonNumber
@@ -276,7 +242,7 @@ class SineWix : MainAPI() {
             }
         }
 
-        return newTvSeriesLoadResponse(title.trim(), "tmdb://tv/$id", TvType.TvSeries, episodes) {
+        return newTvSeriesLoadResponse(title.trim(), "https://www.themoviedb.org/tv/$id", TvType.TvSeries, episodes) {
             this.posterUrl = poster
             this.year = year
             this.plot = description
@@ -290,121 +256,9 @@ class SineWix : MainAPI() {
     }
 
     private suspend fun movieDetail(url: String): LoadResponse? {
-        val result = try {
-            app.get(url, headers = headers, timeout = 10).parsedSafe<SineMovie>()
-        } catch (_: Throwable) {
-            null
-        }
-
-        if (result != null) {
-            val originalName = result.originalName
-            val name = result.title ?: ""
-            val title = if (!originalName.isNullOrBlank() && originalName != name) "$originalName - $name" else name
-            val poster = fixUrl(result.posterPath ?: result.backdropPath)
-            val description = result.overview
-            val year = result.releaseDate?.split("-")?.firstOrNull()?.toIntOrNull()
-            val tags = result.genres?.mapNotNull { it.name }
-            val rating = result.vote
-            val duration = result.runtime?.toIntOrNull()
-            val actors = result.cast?.mapNotNull { if (it.name != null) Actor(it.name, fixUrl(it.profilePath)) else null }
-            val trailer = result.trailer
-            val videoUrl = result.videos?.firstOrNull()?.link ?: url
-
-            return newMovieLoadResponse(
-                title,
-                url,
-                TvType.Movie,
-                videoUrl
-            ) {
-                this.posterUrl = poster
-                this.plot = description
-                this.year = year
-                this.tags = tags
-                this.score = Score.from10(rating)
-                this.duration = duration
-                addActors(actors)
-                if (!trailer.isNullOrBlank()) {
-                    addTrailer("https://www.youtube.com/embed/${trailer}")
-                }
-            }
-        }
-
-        // Fallback to TMDB if SineWix API returns null/401
         val id = url.substringAfter("/media/detail/").substringBefore("/").toIntOrNull()
         if (id != null) {
             return loadTmdbMovie(id)
-        }
-        return null
-    }
-
-    private suspend fun serieDetail(url: String): LoadResponse? {
-        val result = try {
-            app.get(url, headers = headers, timeout = 10).parsedSafe<SineSerie>()
-        } catch (_: Throwable) {
-            null
-        }
-
-        if (result != null) {
-            val originalName = result.originalName ?: ""
-            val name = result.name ?: ""
-            val title = if (originalName.isNotEmpty() && originalName != name) "$originalName - $name" else name
-            val poster = fixUrl(result.posterPath ?: result.backdropPath)
-            val description = result.overview
-            val year = result.releaseDate?.split("-")?.firstOrNull()?.toIntOrNull()
-            val tags = result.genres
-            val rating = result.vote
-            val actors = result.cast?.mapNotNull { if (it.name != null) Actor(it.name, fixUrl(it.profilePath)) else null }
-            val trailer = result.trailer
-
-            val episodes = mutableListOf<Episode>()
-            result.seasons?.forEach { seasonItem ->
-                val seasonNumber = seasonItem.seasonNumber
-                Log.d("SWX", "seasonNumber » $seasonNumber")
-                seasonItem.episodes?.forEach { ep ->
-                    Log.d("SWX", "ep » $ep")
-                    val videoLink = ep.videos?.firstOrNull()?.link
-                    if (!videoLink.isNullOrBlank()) {
-                        episodes.add(newEpisode(videoLink) {
-                            this.name = ep.name
-                            this.season = seasonNumber
-                            this.episode = ep.episodeNumber
-                            this.posterUrl = fixUrl(ep.stillPath)
-                        })
-                    }
-                }
-            }
-
-            if (url.contains("/series/show/")) {
-                return newTvSeriesLoadResponse(title.trim(), url, TvType.TvSeries, episodes) {
-                    this.posterUrl = poster
-                    this.year = year
-                    this.plot = description
-                    this.tags = tags
-                    this.score = Score.from10(rating)
-                    addActors(actors)
-                    if (!trailer.isNullOrBlank()) {
-                        addTrailer(trailer)
-                    }
-                }
-            } else {
-                return newTvSeriesLoadResponse(title.trim(), url, TvType.Anime, episodes) {
-                    this.posterUrl = poster
-                    this.year = year
-                    this.plot = description
-                    this.tags = tags
-                    this.score = Score.from10(rating)
-                    addActors(actors)
-                    if (!trailer.isNullOrBlank()) {
-                        addTrailer(trailer)
-                    }
-                }
-            }
-        }
-
-        // Fallback to TMDB if SineWix API returns null/401
-        val id = (if (url.contains("/series/show/")) url.substringAfter("/series/show/") else url.substringAfter("/animes/show/")).substringBefore("/").toIntOrNull()
-        if (id != null) {
-            return loadTmdbTv(id)
         }
         return null
     }
@@ -416,20 +270,53 @@ class SineWix : MainAPI() {
         callback: (ExtractorLink) -> Unit
     ): Boolean {
         Log.d("SWX", "data » $data")
-        if (data.contains("snwaxdop")) {
+        val cleanData = data.trim()
+
+        if (cleanData.contains("snwaxdop")) {
             callback.invoke(
                 newExtractorLink(
                     source = "SineWix",
                     name = "SineWix",
-                    url = data,
+                    url = cleanData,
                     ExtractorLinkType.VIDEO
                 ) {
                     this.quality = Qualities.Unknown.value
                     this.headers = headers
                 }
             )
-        } else if (data.startsWith("tmdb:")) {
-            val parts = data.split(":")
+            return true
+        }
+
+        if (cleanData.startsWith("tt")) {
+            // IMDb ID format: "tt1756855" or "tt1756855:1:2"
+            val parts = cleanData.split(":")
+            if (parts.size == 1) { // movie
+                val imdbId = parts[0]
+                listOf(
+                    "https://vidsrc.me/embed/movie/$imdbId",
+                    "https://vidsrc.to/embed/movie/$imdbId",
+                    "https://autoembed.co/movie/imdb/$imdbId"
+                ).forEach { embedUrl ->
+                    try { loadExtractor(embedUrl, mainUrl, subtitleCallback, callback) } catch (_: Throwable) {}
+                }
+            } else if (parts.size >= 3) { // tv
+                val imdbId = parts[0]
+                val season = parts[1]
+                val episode = parts[2]
+                listOf(
+                    "https://vidsrc.me/embed/tv/$imdbId/$season/$episode",
+                    "https://vidsrc.to/embed/tv/$imdbId/$season/$episode",
+                    "https://autoembed.co/tv/imdb/$imdbId-$season-$episode"
+                ).forEach { embedUrl ->
+                    try { loadExtractor(embedUrl, mainUrl, subtitleCallback, callback) } catch (_: Throwable) {}
+                }
+            }
+            return true
+        }
+
+        if (cleanData.startsWith("tmdb:")) {
+            // TMDB ID format: "tmdb:12345" or "tmdb:12345:1:2"
+            val parts = cleanData.split(":")
             if (parts.size == 2) { // movie
                 val tmdbId = parts[1]
                 listOf(
@@ -451,9 +338,24 @@ class SineWix : MainAPI() {
                     try { loadExtractor(embedUrl, mainUrl, subtitleCallback, callback) } catch (_: Throwable) {}
                 }
             }
-        } else if (data.startsWith("http://") || data.startsWith("https://")) {
-            loadExtractor(data, "${mainUrl}/", subtitleCallback, callback)
+            return true
         }
+
+        if (cleanData.startsWith("http://") || cleanData.startsWith("https://")) {
+            loadExtractor(cleanData, "${mainUrl}/", subtitleCallback, callback)
+            return true
+        }
+
+        if (cleanData.isNotEmpty()) {
+            listOf(
+                "https://vidsrc.me/embed/movie/$cleanData",
+                "https://vidsrc.to/embed/movie/$cleanData",
+                "https://autoembed.co/movie/imdb/$cleanData"
+            ).forEach { embedUrl ->
+                try { loadExtractor(embedUrl, mainUrl, subtitleCallback, callback) } catch (_: Throwable) {}
+            }
+        }
+
         return true
     }
 }
