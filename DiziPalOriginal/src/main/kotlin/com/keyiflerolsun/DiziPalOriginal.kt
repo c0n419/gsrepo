@@ -235,7 +235,7 @@ class DiziPalOriginal : MainAPI() {
         val home = mutableListOf<SearchResponse>()
 
         try {
-            val targetUrl = request.data.replace(Regex("""https://dizipal\d+\.com"""), mainUrl)
+            val targetUrl = request.data.replace(Regex("""https?://(dizipal\d*|ctutu|dizipal)\.[a-z0-9]+"""), mainUrl)
             val url = if (page > 1) {
                 if (targetUrl.contains("?")) "$targetUrl&page=$page" else "$targetUrl?page=$page"
             } else {
@@ -322,8 +322,9 @@ class DiziPalOriginal : MainAPI() {
     override suspend fun quickSearch(query: String): List<SearchResponse> = search(query)
 
     override suspend fun load(url: String): LoadResponse? {
+        val targetUrl = url.replace(Regex("""https?://(dizipal\d*|ctutu|dizipal)\.[a-z0-9]+"""), mainUrl)
         val document = app.get(
-            url, timeout = 10000, interceptor = interceptor, headers = getHeaders(mainUrl)
+            targetUrl, timeout = 10000, interceptor = interceptor, headers = getHeaders(mainUrl)
         ).document
 
         val rawTitle = document.selectFirst("h1, h2.title, div.page-top h1, .detail-title")?.text()?.trim()
@@ -334,14 +335,18 @@ class DiziPalOriginal : MainAPI() {
             .removeSuffix(" izle | Dizipal").removeSuffix(" izle - Dizipal")
             .removeSuffix(" izle").removeSuffix(" İzle").trim()
 
-        val rawPoster = document.selectFirst("img[data-src*='posters']")?.attr("data-src")
-            ?: document.selectFirst("img[src*='posters']")?.attr("src")
-            ?: document.selectFirst(".poster img, .detail-poster img")?.let { img ->
-                img.attr("data-src").takeIf { it.isNotBlank() && !it.startsWith("data:") } ?: img.attr("src").takeIf { it.isNotBlank() && !it.startsWith("data:") }
+        val rawPoster = document.selectFirst("meta[property='og:image']")?.attr("content")?.takeIf { it.isNotBlank() && !it.startsWith("data:") }
+            ?: document.selectFirst("meta[name='twitter:image']")?.attr("content")?.takeIf { it.isNotBlank() && !it.startsWith("data:") }
+            ?: document.selectFirst(".film-poster img, .series-poster img, .detail-poster img, .poster img")?.let { img ->
+                img.attr("src").takeIf { it.isNotBlank() && !it.startsWith("data:") }
+                    ?: img.attr("data-src").takeIf { it.isNotBlank() && !it.startsWith("data:") }
             }
-            ?: document.selectFirst("div.page-top img[alt]")?.attr("src")
-            ?: document.selectFirst("meta[property='og:image']")?.attr("content")
-            ?: document.selectFirst("meta[name='twitter:image']")?.attr("content")
+            ?: document.selectFirst("div.page-top img[alt]")?.let { img ->
+                img.attr("src").takeIf { it.isNotBlank() && !it.startsWith("data:") }
+                    ?: img.attr("data-src").takeIf { it.isNotBlank() && !it.startsWith("data:") }
+            }
+            ?: document.selectFirst("img[data-src*='posters']")?.attr("data-src")
+            ?: document.selectFirst("img[src*='posters']")?.attr("src")
 
         val backdropImg = document.selectFirst("img[src*='backdrop'], img[data-src*='backdrop']")
         val backdropUrl = backdropImg?.attr("data-src")?.takeIf { it.isNotBlank() } ?: backdropImg?.attr("src")
@@ -367,8 +372,8 @@ class DiziPalOriginal : MainAPI() {
             }
         val ratingNum = scoreRaw?.let { Regex("""(\d+(?:[.,]\d+)?)""").find(it)?.groupValues?.get(1)?.replace(",", ".") }
 
-        if (url.contains("/movies/") || url.contains("/film/")) {
-            return newMovieLoadResponse(title, url, TvType.Movie, url) {
+        if (targetUrl.contains("/movies/") || targetUrl.contains("/film/")) {
+            return newMovieLoadResponse(title, targetUrl, TvType.Movie, targetUrl) {
                 this.posterUrl = poster
                 this.year      = year
                 this.plot      = description
@@ -399,7 +404,7 @@ class DiziPalOriginal : MainAPI() {
             }
         }.distinctBy { it.data }
 
-        return newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodes) {
+        return newTvSeriesLoadResponse(title, targetUrl, TvType.TvSeries, episodes) {
             this.posterUrl = poster
             this.year      = year
             this.plot      = description
@@ -445,7 +450,7 @@ class DiziPalOriginal : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        val targetUrl = data.replace(Regex("""https://dizipal\d+\.com"""), mainUrl)
+        val targetUrl = data.replace(Regex("""https?://(dizipal\d*|ctutu|dizipal)\.[a-z0-9]+"""), mainUrl)
         Log.d("DiziPalOriginal", "--> loadLinks URL: $targetUrl")
         var iframeUrl = ""
 
