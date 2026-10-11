@@ -38,6 +38,9 @@ class SineWix : MainAPI() {
     override val hasDownloadSupport = true
     override val supportedTypes = setOf(TvType.Movie, TvType.TvSeries, TvType.Anime)
 
+    private val tmdbApiKey = "e6333b32409e02a4a6eba6fb7ff866bb"
+    private val tmdbBaseUrl = "https://api.themoviedb.org/3"
+
     override val mainPage = mainPageOf(
         "${mainUrl}/genres/topteen/all" to "Top 10 Listesi",
         "${mainUrl}/genres/latestmovies/all" to "Son Eklenen Filmler",
@@ -77,11 +80,30 @@ class SineWix : MainAPI() {
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         val url = "${request.data}/${key}?page=$page"
         val result = app.get(url, headers = headers).parsedSafe<SineSonuc>()
-            ?: return newHomePageResponse(request.name, emptyList())
 
-        val home = result.data.mapNotNull { it.toMainPageResult() }
+        if (result != null && !result.data.isNullOrEmpty()) {
+            val home = result.data.mapNotNull { it.toMainPageResult() }
+            if (home.isNotEmpty()) {
+                return newHomePageResponse(request.name, home)
+            }
+        }
 
-        return newHomePageResponse(request.name, home)
+        // Fallback to TMDB API for category pages when SineWix direct API returns empty/error
+        val tmdbUrl = when (request.name) {
+            "Top 10 Listesi" -> "${tmdbBaseUrl}/trending/all/day?api_key=${tmdbApiKey}&language=tr-TR&page=$page"
+            "Son Eklenen Filmler" -> "${tmdbBaseUrl}/movie/now_playing?api_key=${tmdbApiKey}&language=tr-TR&page=$page"
+            "Son Eklenen Diziler" -> "${tmdbBaseUrl}/tv/on_the_air?api_key=${tmdbApiKey}&language=tr-TR&page=$page"
+            "Son Eklenen Animeler" -> "${tmdbBaseUrl}/discover/tv?api_key=${tmdbApiKey}&language=tr-TR&with_genres=16&with_original_language=ja&page=$page"
+            "Filmler" -> "${tmdbBaseUrl}/discover/movie?api_key=${tmdbApiKey}&language=tr-TR&sort_by=popularity.desc&page=$page"
+            "Diziler" -> "${tmdbBaseUrl}/discover/tv?api_key=${tmdbApiKey}&language=tr-TR&sort_by=popularity.desc&page=$page"
+            "Animeler" -> "${tmdbBaseUrl}/discover/tv?api_key=${tmdbApiKey}&language=tr-TR&sort_by=popularity.desc&with_genres=16&with_original_language=ja&page=$page"
+            else -> "${tmdbBaseUrl}/trending/all/day?api_key=${tmdbApiKey}&language=tr-TR&page=$page"
+        }
+
+        val tmdbRes = app.get(tmdbUrl).parsedSafe<TmdbPageResult>()
+        val items = tmdbRes?.results?.mapNotNull { it.toSearchResponse() } ?: emptyList()
+
+        return newHomePageResponse(request.name, items)
     }
 
     private fun SineData.toMainPageResult(): SearchResponse? {
@@ -116,20 +138,136 @@ class SineWix : MainAPI() {
         }
     }
 
-    override suspend fun search(query: String): List<SearchResponse>? {
-        val result = app.get("${mainUrl}/search/${query}/${key}", headers = headers).parsedSafe<SineSearch>()
-            ?: return emptyList()
+    private fun TmdbItem.toSearchResponse(): SearchResponse? {
+        val title = this.title ?: this.name ?: return null
+        val id = this.id ?: return null
+        val posterUrl = fixUrl(this.posterPath ?: this.backdropPath)
+        val score = this.voteAverage
+        val isTv = this.mediaType == "tv" || (this.name != null && this.title == null)
 
-        return result.search?.mapNotNull { it.toMainPageResult() }
+        if (isTv) {
+            val href = "tmdb://tv/$id"
+            return newTvSeriesSearchResponse(title, href, TvType.TvSeries) {
+                this.posterUrl = posterUrl
+                this.score = Score.from10(score)
+            }
+        } else {
+            val href = "tmdb://movie/$id"
+            return newMovieSearchResponse(title, href, TvType.Movie) {
+                this.posterUrl = posterUrl
+                this.score = Score.from10(score)
+            }
+        }
     }
 
-    override suspend fun quickSearch(query: String): List<SearchResponse>? = search(query)
+    override suspend fun search(query: String): List<SearchResponse> {
+        val result = app.get("${mainUrl}/search/${query}/${key}", headers = headers).parsedSafe<SineSearch>()
+        if (result != null && !result.search.isNullOrEmpty()) {
+            val items = result.search.mapNotNull { it.toMainPageResult() }
+            if (items.isNotEmpty()) return items
+        }
+
+        // Fallback to TMDB Search
+        val tmdbUrl = "${tmdbBaseUrl}/search/multi?api_key=${tmdbApiKey}&language=tr-TR&query=${query}"
+        val tmdbRes = app.get(tmdbUrl).parsedSafe<TmdbPageResult>()
+        return tmdbRes?.results?.mapNotNull { it.toSearchResponse() } ?: emptyList()
+    }
+
+    override suspend fun quickSearch(query: String): List<SearchResponse> = search(query)
 
     override suspend fun load(url: String): LoadResponse? {
+        if (url.startsWith("tmdb://movie/")) {
+            val id = url.removePrefix("tmdb://movie/").toIntOrNull() ?: return null
+            return loadTmdbMovie(id)
+        } else if (url.startsWith("tmdb://tv/")) {
+            val id = url.removePrefix("tmdb://tv/").toIntOrNull() ?: return null
+            return loadTmdbTv(id)
+        }
+
         return if (url.contains("/media/detail/")) {
             movieDetail(url)
         } else {
             serieDetail(url)
+        }
+    }
+
+    private suspend fun loadTmdbMovie(id: Int): LoadResponse? {
+        val url = "${tmdbBaseUrl}/movie/${id}?api_key=${tmdbApiKey}&language=tr-TR&append_to_response=credits,videos,external_ids"
+        val res = app.get(url).parsedSafe<TmdbMovieDetail>() ?: return null
+
+        val originalName = res.originalTitle
+        val name = res.title ?: ""
+        val title = if (!originalName.isNullOrBlank() && originalName != name) "$originalName - $name" else name
+        val poster = fixUrl(res.posterPath ?: res.backdropPath)
+        val description = res.overview
+        val year = res.releaseDate?.split("-")?.firstOrNull()?.toIntOrNull()
+        val tags = res.genres?.mapNotNull { it.name }
+        val rating = res.voteAverage
+        val duration = res.runtime
+        val actors = res.credits?.cast?.mapNotNull { if (it.name != null) Actor(it.name, fixUrl(it.profilePath)) else null }
+        val trailerKey = res.videos?.results?.firstOrNull { it.site == "YouTube" }?.key
+        val imdbId = res.externalIds?.imdbId
+
+        val streamData = imdbId ?: "tmdb:$id"
+
+        return newMovieLoadResponse(title, "tmdb://movie/$id", TvType.Movie, streamData) {
+            this.posterUrl = poster
+            this.plot = description
+            this.year = year
+            this.tags = tags
+            this.score = Score.from10(rating)
+            this.duration = duration
+            addActors(actors)
+            if (!trailerKey.isNullOrBlank()) {
+                addTrailer("https://www.youtube.com/embed/${trailerKey}")
+            }
+        }
+    }
+
+    private suspend fun loadTmdbTv(id: Int): LoadResponse? {
+        val url = "${tmdbBaseUrl}/tv/${id}?api_key=${tmdbApiKey}&language=tr-TR&append_to_response=credits,videos,external_ids"
+        val res = app.get(url).parsedSafe<TmdbTvDetail>() ?: return null
+
+        val originalName = res.originalName ?: ""
+        val name = res.name ?: ""
+        val title = if (originalName.isNotEmpty() && originalName != name) "$originalName - $name" else name
+        val poster = fixUrl(res.posterPath ?: res.backdropPath)
+        val description = res.overview
+        val year = res.firstAirDate?.split("-")?.firstOrNull()?.toIntOrNull()
+        val tags = res.genres?.mapNotNull { it.name }
+        val rating = res.voteAverage
+        val actors = res.credits?.cast?.mapNotNull { if (it.name != null) Actor(it.name, fixUrl(it.profilePath)) else null }
+        val trailerKey = res.videos?.results?.firstOrNull { it.site == "YouTube" }?.key
+
+        val episodes = mutableListOf<Episode>()
+        res.seasons?.forEach { seasonItem ->
+            val seasonNumber = seasonItem.seasonNumber ?: return@forEach
+            if (seasonNumber == 0) return@forEach // skip specials
+            val seasonUrl = "${tmdbBaseUrl}/tv/${id}/season/${seasonNumber}?api_key=${tmdbApiKey}&language=tr-TR"
+            val seasonDetail = app.get(seasonUrl).parsedSafe<TmdbSeasonDetail>()
+            seasonDetail?.episodes?.forEach { ep ->
+                val epNumber = ep.episodeNumber ?: return@forEach
+                val epData = "tmdb:$id:$seasonNumber:$epNumber"
+                episodes.add(newEpisode(epData) {
+                    this.name = ep.name
+                    this.season = seasonNumber
+                    this.episode = epNumber
+                    this.description = ep.overview
+                    this.posterUrl = fixUrl(ep.stillPath)
+                })
+            }
+        }
+
+        return newTvSeriesLoadResponse(title.trim(), "tmdb://tv/$id", TvType.TvSeries, episodes) {
+            this.posterUrl = poster
+            this.year = year
+            this.plot = description
+            this.tags = tags
+            this.score = Score.from10(rating)
+            addActors(actors)
+            if (!trailerKey.isNullOrBlank()) {
+                addTrailer("https://www.youtube.com/embed/${trailerKey}")
+            }
         }
     }
 
@@ -244,7 +382,7 @@ class SineWix : MainAPI() {
                     this.headers = headers
                 }
             )
-        } else {
+        } else if (data.startsWith("http://") || data.startsWith("https://")) {
             loadExtractor(data, "${mainUrl}/", subtitleCallback, callback)
         }
         return true
