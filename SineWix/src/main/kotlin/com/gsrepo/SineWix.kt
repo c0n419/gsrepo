@@ -43,6 +43,9 @@ class SineWix : MainAPI() {
         "${mainUrl}/genres/latestmovies/all" to "Son Eklenen Filmler",
         "${mainUrl}/genres/latestseries/all" to "Son Eklenen Diziler",
         "${mainUrl}/genres/latestanimes/all" to "Son Eklenen Animeler",
+        "${mainUrl}/genres/movies/all" to "Filmler",
+        "${mainUrl}/genres/series/all" to "Diziler",
+        "${mainUrl}/genres/animes/all" to "Animeler",
     )
 
     private val key = "9iQNC5HQwPlaFuJDkhncJ5XTJ8feGXOJatAA"
@@ -63,6 +66,14 @@ class SineWix : MainAPI() {
         "user-agent" to "EasyPlex (Android 13; SM-A546E; samsung; tr)"
     )
 
+    private fun fixUrl(url: String?): String? {
+        if (url.isNullOrBlank()) return null
+        val clean = url.trim()
+        if (clean.startsWith("http://") || clean.startsWith("https://")) return clean
+        if (clean.startsWith("/")) return "https://image.tmdb.org/t/p/w500$clean"
+        return "https://image.tmdb.org/t/p/w500/$clean"
+    }
+
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         val url = "${request.data}/${key}?page=$page"
         val result = app.get(url, headers = headers).parsedSafe<SineSonuc>()
@@ -75,7 +86,7 @@ class SineWix : MainAPI() {
 
     private fun SineData.toMainPageResult(): SearchResponse? {
         val title = this.title ?: this.name ?: return null
-        val posterUrl = this.posterPath
+        val posterUrl = fixUrl(this.posterPath ?: this.backdropPath)
         val score = this.vote
         val href: String
         when (this.type) {
@@ -127,13 +138,13 @@ class SineWix : MainAPI() {
         val originalName = result.originalName
         val name = result.title ?: ""
         val title = if (!originalName.isNullOrBlank() && originalName != name) "$originalName - $name" else name
-        val poster = result.backdropPath ?: result.posterPath
+        val poster = fixUrl(result.posterPath ?: result.backdropPath)
         val description = result.overview
         val year = result.releaseDate?.split("-")?.firstOrNull()?.toIntOrNull()
         val tags = result.genres?.mapNotNull { it.name }
         val rating = result.vote
         val duration = result.runtime?.toIntOrNull()
-        val actors = result.cast?.mapNotNull { if (it.name != null) Actor(it.name, it.profilePath) else null }
+        val actors = result.cast?.mapNotNull { if (it.name != null) Actor(it.name, fixUrl(it.profilePath)) else null }
         val trailer = result.trailer
         val videoUrl = result.videos?.firstOrNull()?.link ?: url
 
@@ -161,12 +172,12 @@ class SineWix : MainAPI() {
         val originalName = result.originalName ?: ""
         val name = result.name ?: ""
         val title = if (originalName.isNotEmpty() && originalName != name) "$originalName - $name" else name
-        val poster = result.backdropPath ?: result.posterPath
+        val poster = fixUrl(result.posterPath ?: result.backdropPath)
         val description = result.overview
         val year = result.releaseDate?.split("-")?.firstOrNull()?.toIntOrNull()
         val tags = result.genres
         val rating = result.vote
-        val actors = result.cast?.mapNotNull { if (it.name != null) Actor(it.name, it.profilePath) else null }
+        val actors = result.cast?.mapNotNull { if (it.name != null) Actor(it.name, fixUrl(it.profilePath)) else null }
         val trailer = result.trailer
 
         val episodes = mutableListOf<Episode>()
@@ -181,7 +192,7 @@ class SineWix : MainAPI() {
                         this.name = ep.name
                         this.season = seasonNumber
                         this.episode = ep.episodeNumber
-                        this.posterUrl = ep.stillPath
+                        this.posterUrl = fixUrl(ep.stillPath)
                     })
                 }
             }
