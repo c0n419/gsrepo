@@ -103,7 +103,7 @@ class DiziPalOriginal : MainAPI() {
         "$mainUrl/kategori/romantik"     to "Romantik"
     )
 
-    private val cardSelector = "li.content-card, div.content-card, article.content-card, article.dp-card, div.dp-card, div.poster, div.movie-item, div.serie-item, div.content-item, div.card, div.group, a.top10-item, div.top10-item, a.card-link"
+    private val cardSelector = "li.content-card, article.content-card, article.dp-card, div.dp-card, div.movie-item, div.serie-item, div.content-item, a.top10-item, div.top10-item"
 
     private fun fixPosterUrl(url: String?, backdropUrl: String? = null): String? {
         val cleanUrl = fixUrlNull(url?.takeIf { it.isNotBlank() && !it.startsWith("data:") })
@@ -173,30 +173,33 @@ class DiziPalOriginal : MainAPI() {
 
         val titleSelectors = ".card-title, .top10-title-text, h2, h3, h4, h5, .title, .name, .content-title, .dp-title, div.font-semibold, div.truncate, div.line-clamp-1, div.line-clamp-2, span.title, span.name"
         
+        val titleFromEl = this.select(titleSelectors).firstOrNull {
+            val t = it.text().trim()
+            val cls = it.className().lowercase()
+            val tLow = t.lowercase()
+            t.isNotBlank()
+            && !t.matches(Regex("""^[\d.,\s/]+$"""))
+            && !tLow.contains("imdb")
+            && !tLow.contains("sezon")
+            && !tLow.contains("bölüm")
+            && !cls.contains("imdb")
+            && !cls.contains("score")
+            && !cls.contains("rating")
+            && !cls.contains("point")
+        }?.text()?.trim()
+
         val aTitle = aTag.attr("title").trim()
         val imgAlt = imgEl?.attr("alt")?.trim() ?: ""
-        val rawTitle = if (aTitle.isNotBlank() && !aTitle.lowercase().endsWith("izle")) {
+
+        val rawTitle = if (!titleFromEl.isNullOrBlank()) {
+            titleFromEl
+        } else if (aTitle.isNotBlank() && !aTitle.lowercase().endsWith("izle")) {
             aTitle
         } else if (imgAlt.isNotBlank() && imgAlt != "loading icon" && !imgAlt.lowercase().contains("reklam")) {
             imgAlt
         } else {
-            this.select(titleSelectors).firstOrNull {
-                val t = it.text().trim()
-                val cls = it.className().lowercase()
-                val tLow = t.lowercase()
-                t.isNotBlank()
-                && !t.matches(Regex("""^[\d.,\s/]+$"""))
-                && !tLow.contains("imdb")
-                && !tLow.contains("sezon")
-                && !tLow.contains("bölüm")
-                && !cls.contains("imdb")
-                && !cls.contains("score")
-                && !cls.contains("rating")
-                && !cls.contains("point")
-            }?.text()
-            ?: aTag.attr("title")
-            ?: this.attr("title")
-        }.toString().trim()
+            aTag.attr("title").ifBlank { this.attr("title") }
+        }
 
         val title = rawTitle
             .removeSuffix(" izle").removeSuffix(" İzle")
