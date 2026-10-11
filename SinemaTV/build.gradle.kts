@@ -15,4 +15,5 @@ cloudstream {
     status = 1
     tvTypes = listOf("Movie", "TvSeries", "Anime", "Cartoon")
     iconUrl = "https://www.google.com/s2/favicons?domain=sinematv.az&sz=%size%"
+    requiresResources = false
 }

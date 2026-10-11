@@ -1,9 +1,9 @@
-version = 1
+version = 2
 
 cloudstream {
     authors = listOf("csprofesor")
     language    = "tr"
-    description = "Ddizi, dizi izle, dizi seyret, ddizi.im - Güncel ve eski dizileri en iyi görüntü kalitesiyle bulabileceğiniz dizi izleme sitesi."
+    description = "Ddizi, dizi izle, dizi seyret, ddizi.tel - Güncel ve eski dizileri en iyi görüntü kalitesiyle bulabileceğiniz dizi izleme sitesi."
 
     /**
      * Status int as the following:
@@ -14,7 +14,7 @@ cloudstream {
     **/
     status  = 1 // will be 3 if unspecified
     tvTypes = listOf("TvSeries")
-    iconUrl = "https://www.google.com/s2/favicons?domain=ddizi.im&sz=%size%"
+    iconUrl = "https://www.google.com/s2/favicons?domain=ddizi.tel&sz=%size%"
 }
 
 android {
