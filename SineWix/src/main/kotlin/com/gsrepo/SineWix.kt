@@ -42,13 +42,17 @@ class SineWix : MainAPI() {
     private val tmdbBaseUrl = "https://api.themoviedb.org/3"
 
     override val mainPage = mainPageOf(
-        "${mainUrl}/genres/topteen/all" to "Top 10 Listesi",
-        "${mainUrl}/genres/latestmovies/all" to "Son Eklenen Filmler",
-        "${mainUrl}/genres/latestseries/all" to "Son Eklenen Diziler",
-        "${mainUrl}/genres/latestanimes/all" to "Son Eklenen Animeler",
-        "${mainUrl}/genres/movies/all" to "Filmler",
-        "${mainUrl}/genres/series/all" to "Diziler",
-        "${mainUrl}/genres/animes/all" to "Animeler",
+        "top10" to "Top 10 Listesi",
+        "latest_movies" to "Son Eklenen Filmler",
+        "latest_series" to "Son Eklenen Diziler",
+        "latest_animes" to "Son Eklenen Animeler",
+        "action_movies" to "Aksiyon Filmleri",
+        "comedy_movies" to "Komedi Filmleri",
+        "horror_movies" to "Korku Filmleri",
+        "scifi_movies" to "Bilim Kurgu Filmleri",
+        "drama_series" to "Dram Dizileri",
+        "crime_series" to "Suç Dizileri",
+        "animes" to "Animeler",
     )
 
     private val key = "9iQNC5HQwPlaFuJDkhncJ5XTJ8feGXOJatAA"
@@ -78,29 +82,18 @@ class SineWix : MainAPI() {
     }
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        val url = "${request.data}/${key}?page=$page"
-        val result = try {
-            app.get(url, headers = headers, timeout = 10).parsedSafe<SineSonuc>()
-        } catch (_: Throwable) {
-            null
-        }
-
-        if (result != null && !result.data.isNullOrEmpty()) {
-            val home = result.data.mapNotNull { it.toMainPageResult() }
-            if (home.isNotEmpty()) {
-                return newHomePageResponse(request.name, home)
-            }
-        }
-
-        // Fallback to TMDB API for category pages when SineWix direct API returns empty/error/401
-        val tmdbUrl = when (request.name) {
-            "Top 10 Listesi" -> "${tmdbBaseUrl}/trending/all/day?api_key=${tmdbApiKey}&language=tr-TR&page=$page"
-            "Son Eklenen Filmler" -> "${tmdbBaseUrl}/movie/now_playing?api_key=${tmdbApiKey}&language=tr-TR&page=$page"
-            "Son Eklenen Diziler" -> "${tmdbBaseUrl}/tv/on_the_air?api_key=${tmdbApiKey}&language=tr-TR&page=$page"
-            "Son Eklenen Animeler" -> "${tmdbBaseUrl}/discover/tv?api_key=${tmdbApiKey}&language=tr-TR&with_genres=16&with_original_language=ja&page=$page"
-            "Filmler" -> "${tmdbBaseUrl}/discover/movie?api_key=${tmdbApiKey}&language=tr-TR&sort_by=popularity.desc&page=$page"
-            "Diziler" -> "${tmdbBaseUrl}/discover/tv?api_key=${tmdbApiKey}&language=tr-TR&sort_by=popularity.desc&page=$page"
-            "Animeler" -> "${tmdbBaseUrl}/discover/tv?api_key=${tmdbApiKey}&language=tr-TR&sort_by=popularity.desc&with_genres=16&with_original_language=ja&page=$page"
+        val tmdbUrl = when (request.data) {
+            "top10" -> "${tmdbBaseUrl}/trending/all/day?api_key=${tmdbApiKey}&language=tr-TR&page=$page"
+            "latest_movies" -> "${tmdbBaseUrl}/movie/now_playing?api_key=${tmdbApiKey}&language=tr-TR&page=$page"
+            "latest_series" -> "${tmdbBaseUrl}/tv/on_the_air?api_key=${tmdbApiKey}&language=tr-TR&page=$page"
+            "latest_animes" -> "${tmdbBaseUrl}/discover/tv?api_key=${tmdbApiKey}&language=tr-TR&with_genres=16&with_original_language=ja&page=$page"
+            "action_movies" -> "${tmdbBaseUrl}/discover/movie?api_key=${tmdbApiKey}&language=tr-TR&with_genres=28&sort_by=popularity.desc&page=$page"
+            "comedy_movies" -> "${tmdbBaseUrl}/discover/movie?api_key=${tmdbApiKey}&language=tr-TR&with_genres=35&sort_by=popularity.desc&page=$page"
+            "horror_movies" -> "${tmdbBaseUrl}/discover/movie?api_key=${tmdbApiKey}&language=tr-TR&with_genres=27&sort_by=popularity.desc&page=$page"
+            "scifi_movies" -> "${tmdbBaseUrl}/discover/movie?api_key=${tmdbApiKey}&language=tr-TR&with_genres=878&sort_by=popularity.desc&page=$page"
+            "drama_series" -> "${tmdbBaseUrl}/discover/tv?api_key=${tmdbApiKey}&language=tr-TR&with_genres=18&sort_by=popularity.desc&page=$page"
+            "crime_series" -> "${tmdbBaseUrl}/discover/tv?api_key=${tmdbApiKey}&language=tr-TR&with_genres=80&sort_by=popularity.desc&page=$page"
+            "animes" -> "${tmdbBaseUrl}/discover/tv?api_key=${tmdbApiKey}&language=tr-TR&with_genres=16&with_original_language=ja&sort_by=popularity.desc&page=$page"
             else -> "${tmdbBaseUrl}/trending/all/day?api_key=${tmdbApiKey}&language=tr-TR&page=$page"
         }
 
@@ -170,18 +163,6 @@ class SineWix : MainAPI() {
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
-        val result = try {
-            app.get("${mainUrl}/search/${query}/${key}", headers = headers, timeout = 10).parsedSafe<SineSearch>()
-        } catch (_: Throwable) {
-            null
-        }
-
-        if (result != null && !result.search.isNullOrEmpty()) {
-            val items = result.search.mapNotNull { it.toMainPageResult() }
-            if (items.isNotEmpty()) return items
-        }
-
-        // Fallback to TMDB Search
         val tmdbUrl = "${tmdbBaseUrl}/search/multi?api_key=${tmdbApiKey}&language=tr-TR&query=${query}"
         val tmdbRes = try {
             app.get(tmdbUrl, timeout = 10).parsedSafe<TmdbPageResult>()
@@ -195,19 +176,25 @@ class SineWix : MainAPI() {
     override suspend fun quickSearch(query: String): List<SearchResponse> = search(query)
 
     override suspend fun load(url: String): LoadResponse? {
-        if (url.startsWith("tmdb://movie/")) {
-            val id = url.removePrefix("tmdb://movie/").toIntOrNull() ?: return null
-            return loadTmdbMovie(id)
-        } else if (url.startsWith("tmdb://tv/")) {
-            val id = url.removePrefix("tmdb://tv/").toIntOrNull() ?: return null
-            return loadTmdbTv(id)
+        val movieMatch = Regex("""tmdb://movie/(\d+)""").find(url) ?: Regex("""/media/detail/(\d+)""").find(url)
+        if (movieMatch != null) {
+            val id = movieMatch.groupValues[1].toIntOrNull()
+            if (id != null) return loadTmdbMovie(id)
         }
 
-        return if (url.contains("/media/detail/")) {
-            movieDetail(url)
-        } else {
-            serieDetail(url)
+        val tvMatch = Regex("""tmdb://tv/(\d+)""").find(url) ?: Regex("""/(?:series|animes)/show/(\d+)""").find(url)
+        if (tvMatch != null) {
+            val id = tvMatch.groupValues[1].toIntOrNull()
+            if (id != null) return loadTmdbTv(id)
         }
+
+        if (url.contains("/media/detail/")) {
+            return movieDetail(url)
+        } else if (url.contains("/series/show/") || url.contains("/animes/show/")) {
+            return serieDetail(url)
+        }
+
+        return null
     }
 
     private suspend fun loadTmdbMovie(id: Int): LoadResponse? {
