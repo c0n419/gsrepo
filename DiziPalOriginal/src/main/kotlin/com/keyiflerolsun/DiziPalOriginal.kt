@@ -41,7 +41,7 @@ import javax.crypto.spec.PBEKeySpec
 import javax.crypto.spec.SecretKeySpec
 
 class DiziPalOriginal : MainAPI() {
-    override var mainUrl = "https://dizipal2137.com"
+    override var mainUrl = "https://dizipal2138.com"
     override var name = "DiziPalOriginal"
     override val hasMainPage = true
     override var lang = "tr"
@@ -103,7 +103,7 @@ class DiziPalOriginal : MainAPI() {
         "$mainUrl/kategori/romantik"     to "Romantik"
     )
 
-    private val cardSelector = "li.content-card, div.content-card, article.content-card, article.dp-card, div.dp-card, div.poster, div.movie-item, div.serie-item, div.content-item, div.card, div.group"
+    private val cardSelector = "li.content-card, div.content-card, article.content-card, article.dp-card, div.dp-card, div.poster, div.movie-item, div.serie-item, div.content-item, div.card, div.group, a.top10-item, div.top10-item, a.card-link"
 
     private fun fixPosterUrl(url: String?, backdropUrl: String? = null): String? {
         val cleanUrl = fixUrlNull(url?.takeIf { it.isNotBlank() && !it.startsWith("data:") })
@@ -171,7 +171,7 @@ class DiziPalOriginal : MainAPI() {
 
         val posterUrl = fixPosterUrl(rawPoster, backdropUrl) ?: return null
 
-        val titleSelectors = ".card-title, h2, h3, h4, h5, .title, .name, .content-title, .dp-title, div.font-semibold, div.truncate, div.line-clamp-1, div.line-clamp-2, span.title, span.name"
+        val titleSelectors = ".card-title, .top10-title-text, h2, h3, h4, h5, .title, .name, .content-title, .dp-title, div.font-semibold, div.truncate, div.line-clamp-1, div.line-clamp-2, span.title, span.name"
         
         val aTitle = aTag.attr("title").trim()
         val imgAlt = imgEl?.attr("alt")?.trim() ?: ""
@@ -204,8 +204,8 @@ class DiziPalOriginal : MainAPI() {
         if (title.isBlank()) return null
 
         val scoreRaw = (
-            this.selectFirst(".card-rating, .imdb, .rating, .score, .point, .dp-rating, .dp-imdb, span[class*='imdb'], div[class*='imdb'], span[class*='rating'], div[class*='rating']")?.text()
-            ?: aTag.selectFirst(".card-rating, .imdb, .rating, .score, .point, .dp-rating, .dp-imdb, span[class*='imdb'], div[class*='imdb'], span[class*='rating'], div[class*='rating']")?.text()
+            this.selectFirst(".card-rating, .top10-rating, .imdb, .rating, .score, .point, .dp-rating, .dp-imdb, span[class*='imdb'], div[class*='imdb'], span[class*='rating'], div[class*='rating']")?.text()
+            ?: aTag.selectFirst(".card-rating, .top10-rating, .imdb, .rating, .score, .point, .dp-rating, .dp-imdb, span[class*='imdb'], div[class*='imdb'], span[class*='rating'], div[class*='rating']")?.text()
             ?: this.attr("data-imdb").takeIf { it.isNotBlank() }
             ?: aTag.attr("data-imdb").takeIf { it.isNotBlank() }
             ?: this.attr("data-score").takeIf { it.isNotBlank() }
@@ -323,7 +323,7 @@ class DiziPalOriginal : MainAPI() {
             url, timeout = 10000, interceptor = interceptor, headers = getHeaders(mainUrl)
         ).document
 
-        val rawTitle = document.selectFirst("h1, h2.title, div.page-top h1")?.text()?.trim()
+        val rawTitle = document.selectFirst("h1, h2.title, div.page-top h1, .detail-title")?.text()?.trim()
             ?: document.selectFirst("meta[property='og:title']")?.attr("content")?.trim()
             ?: return null
 
@@ -333,8 +333,12 @@ class DiziPalOriginal : MainAPI() {
 
         val rawPoster = document.selectFirst("img[data-src*='posters']")?.attr("data-src")
             ?: document.selectFirst("img[src*='posters']")?.attr("src")
+            ?: document.selectFirst(".poster img, .detail-poster img")?.let { img ->
+                img.attr("data-src").takeIf { it.isNotBlank() && !it.startsWith("data:") } ?: img.attr("src").takeIf { it.isNotBlank() && !it.startsWith("data:") }
+            }
             ?: document.selectFirst("div.page-top img[alt]")?.attr("src")
             ?: document.selectFirst("meta[property='og:image']")?.attr("content")
+            ?: document.selectFirst("meta[name='twitter:image']")?.attr("content")
 
         val backdropImg = document.selectFirst("img[src*='backdrop'], img[data-src*='backdrop']")
         val backdropUrl = backdropImg?.attr("data-src")?.takeIf { it.isNotBlank() } ?: backdropImg?.attr("src")
@@ -342,15 +346,22 @@ class DiziPalOriginal : MainAPI() {
         val poster = fixPosterUrl(rawPoster, backdropUrl)
 
         val year = document.selectXpath("//div[text()='Yıl']//following-sibling::div").text().trim().toIntOrNull()
+            ?: document.select(".info-row, .sidebar-info div").firstNotNullOfOrNull { el ->
+                if (el.text().contains("Yıl")) Regex("""(\d{4})""").find(el.text())?.groupValues?.get(1)?.toIntOrNull() else null
+            }
             ?: Regex("""\((\d{4})\)""").find(document.title())?.groupValues?.get(1)?.toIntOrNull()
             ?: Regex("""\((\d{4})\)""").find(rawTitle)?.groupValues?.get(1)?.toIntOrNull()
 
-        val description = document.selectFirst("div.summary p, div.description p, p.overview")?.text()?.trim()
+        val description = document.selectFirst("p.series-description, p.movie-description, div.summary p, div.description p, p.overview, .detail-summary, .overview")?.text()?.trim()
             ?: document.selectFirst("meta[name='description']")?.attr("content")
+            ?: document.selectFirst("meta[property='og:description']")?.attr("content")
 
-        val tags = document.select("a[href*='/kategori/'], a[href*='/tur/']").map { it.text().trim() }.filter { it.isNotEmpty() }.distinct()
+        val tags = document.select(".sidebar-info a[href*='/kategori/'], .sidebar-info a[href*='/tur/'], a[href*='/kategori/'], a[href*='/tur/']").map { it.text().trim() }.filter { it.isNotEmpty() }.distinct()
 
-        val scoreRaw = document.selectFirst(".card-rating, .imdb, .rating, .dp-rating, span[class*='imdb'], div[class*='imdb']")?.text()?.trim()
+        val scoreRaw = document.selectFirst(".card-rating, .top10-rating, .imdb, .rating, .dp-rating, span[class*='imdb'], div[class*='imdb']")?.text()?.trim()
+            ?: document.select(".info-row").firstNotNullOfOrNull { el ->
+                if (el.text().contains("IMDB")) Regex("""(\d+(?:[.,]\d+)?)""").find(el.text())?.groupValues?.get(1) else null
+            }
         val ratingNum = scoreRaw?.let { Regex("""(\d+(?:[.,]\d+)?)""").find(it)?.groupValues?.get(1)?.replace(",", ".") }
 
         if (url.contains("/movies/") || url.contains("/film/")) {
@@ -363,7 +374,7 @@ class DiziPalOriginal : MainAPI() {
             }
         }
 
-        val episodeElements = document.select("a[href*='/bolum/'], a[href*='/episode/'], li.episode-item, div.episode-card, a.dp-detail-episode")
+        val episodeElements = document.select("a[href*='/bolum/'], a[href*='/episode/'], li.episode-item, div.episode-card, a.dp-detail-episode, .detail-episode-item-wrap a")
         val episodes = episodeElements.mapNotNull { element ->
             val linkElement = if (element.tagName() == "a") element else element.selectFirst("a[href]") ?: return@mapNotNull null
             val epHref = fixUrlNull(linkElement.attr("href")) ?: return@mapNotNull null
