@@ -182,24 +182,25 @@
     "fileHash": "sha256-a04cff0b51b21a32a6f7429e58adb6e26e455441c265ff811f37b2ae77233075"
   },
   {
-    "url": "https://raw.githubusercontent.com/csprofesor/gsrepo/builds/DiziMom.cs3?v=8c83cc2c2bcab814f5321cc53a08e1d002b3cbafebc0dde0d580bcf851982208",
+    "url": "https://raw.githubusercontent.com/csprofesor/gsrepo/builds/DiziMom.cs3?v=2ff58b7837e6f9f0e96bd7801c731714fbe9bf7d9a4e426699b8b8126f344a4c",
     "status": 1,
-    "version": 67,
+    "version": 68,
     "name": "DiziMom",
     "internalName": "DiziMom",
     "authors": [
       "csprofesor"
     ],
     "description": "Binlerce yerli yabancı dizi arşivi, tüm sezonlar, kesintisiz bölümler. Sadece dizi izle, Dizimom heryerde seninle!",
-    "fileSize": 40126,
+    "fileSize": 39926,
     "repositoryUrl": "https://github.com/csprofesor/gsrepo",
     "language": "tr",
     "tvTypes": [
-      "TvSeries"
+      "TvSeries",
+      "Movie"
     ],
-    "iconUrl": "https://www.google.com/s2/favicons?domain=www.dizimom.plus&sz=%size%",
+    "iconUrl": "https://www.google.com/s2/favicons?domain=www.dizimom.cafe&sz=%size%",
     "apiVersion": 1,
-    "fileHash": "sha256-8c83cc2c2bcab814f5321cc53a08e1d002b3cbafebc0dde0d580bcf851982208"
+    "fileHash": "sha256-2ff58b7837e6f9f0e96bd7801c731714fbe9bf7d9a4e426699b8b8126f344a4c"
   },
   {
     "url": "https://raw.githubusercontent.com/csprofesor/gsrepo/builds/DiziPal.cs3?v=04982f8e8c24e636d4b4ba009cb204dc7349921228c62eea225242063e2ba162",
