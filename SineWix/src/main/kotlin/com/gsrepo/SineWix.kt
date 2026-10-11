@@ -307,38 +307,47 @@ class SineWix : MainAPI() {
             app.get(url, headers = headers, timeout = 10).parsedSafe<SineMovie>()
         } catch (_: Throwable) {
             null
-        } ?: return null
+        }
 
-        val originalName = result.originalName
-        val name = result.title ?: ""
-        val title = if (!originalName.isNullOrBlank() && originalName != name) "$originalName - $name" else name
-        val poster = fixUrl(result.posterPath ?: result.backdropPath)
-        val description = result.overview
-        val year = result.releaseDate?.split("-")?.firstOrNull()?.toIntOrNull()
-        val tags = result.genres?.mapNotNull { it.name }
-        val rating = result.vote
-        val duration = result.runtime?.toIntOrNull()
-        val actors = result.cast?.mapNotNull { if (it.name != null) Actor(it.name, fixUrl(it.profilePath)) else null }
-        val trailer = result.trailer
-        val videoUrl = result.videos?.firstOrNull()?.link ?: url
+        if (result != null) {
+            val originalName = result.originalName
+            val name = result.title ?: ""
+            val title = if (!originalName.isNullOrBlank() && originalName != name) "$originalName - $name" else name
+            val poster = fixUrl(result.posterPath ?: result.backdropPath)
+            val description = result.overview
+            val year = result.releaseDate?.split("-")?.firstOrNull()?.toIntOrNull()
+            val tags = result.genres?.mapNotNull { it.name }
+            val rating = result.vote
+            val duration = result.runtime?.toIntOrNull()
+            val actors = result.cast?.mapNotNull { if (it.name != null) Actor(it.name, fixUrl(it.profilePath)) else null }
+            val trailer = result.trailer
+            val videoUrl = result.videos?.firstOrNull()?.link ?: url
 
-        return newMovieLoadResponse(
-            title,
-            url,
-            TvType.Movie,
-            videoUrl
-        ) {
-            this.posterUrl = poster
-            this.plot = description
-            this.year = year
-            this.tags = tags
-            this.score = Score.from10(rating)
-            this.duration = duration
-            addActors(actors)
-            if (!trailer.isNullOrBlank()) {
-                addTrailer("https://www.youtube.com/embed/${trailer}")
+            return newMovieLoadResponse(
+                title,
+                url,
+                TvType.Movie,
+                videoUrl
+            ) {
+                this.posterUrl = poster
+                this.plot = description
+                this.year = year
+                this.tags = tags
+                this.score = Score.from10(rating)
+                this.duration = duration
+                addActors(actors)
+                if (!trailer.isNullOrBlank()) {
+                    addTrailer("https://www.youtube.com/embed/${trailer}")
+                }
             }
         }
+
+        // Fallback to TMDB if SineWix API returns null/401
+        val id = url.substringAfter("/media/detail/").substringBefore("/").toIntOrNull()
+        if (id != null) {
+            return loadTmdbMovie(id)
+        }
+        return null
     }
 
     private suspend fun serieDetail(url: String): LoadResponse? {
@@ -346,62 +355,71 @@ class SineWix : MainAPI() {
             app.get(url, headers = headers, timeout = 10).parsedSafe<SineSerie>()
         } catch (_: Throwable) {
             null
-        } ?: return null
+        }
 
-        val originalName = result.originalName ?: ""
-        val name = result.name ?: ""
-        val title = if (originalName.isNotEmpty() && originalName != name) "$originalName - $name" else name
-        val poster = fixUrl(result.posterPath ?: result.backdropPath)
-        val description = result.overview
-        val year = result.releaseDate?.split("-")?.firstOrNull()?.toIntOrNull()
-        val tags = result.genres
-        val rating = result.vote
-        val actors = result.cast?.mapNotNull { if (it.name != null) Actor(it.name, fixUrl(it.profilePath)) else null }
-        val trailer = result.trailer
+        if (result != null) {
+            val originalName = result.originalName ?: ""
+            val name = result.name ?: ""
+            val title = if (originalName.isNotEmpty() && originalName != name) "$originalName - $name" else name
+            val poster = fixUrl(result.posterPath ?: result.backdropPath)
+            val description = result.overview
+            val year = result.releaseDate?.split("-")?.firstOrNull()?.toIntOrNull()
+            val tags = result.genres
+            val rating = result.vote
+            val actors = result.cast?.mapNotNull { if (it.name != null) Actor(it.name, fixUrl(it.profilePath)) else null }
+            val trailer = result.trailer
 
-        val episodes = mutableListOf<Episode>()
-        result.seasons?.forEach { seasonItem ->
-            val seasonNumber = seasonItem.seasonNumber
-            Log.d("SWX", "seasonNumber » $seasonNumber")
-            seasonItem.episodes?.forEach { ep ->
-                Log.d("SWX", "ep » $ep")
-                val videoLink = ep.videos?.firstOrNull()?.link
-                if (!videoLink.isNullOrBlank()) {
-                    episodes.add(newEpisode(videoLink) {
-                        this.name = ep.name
-                        this.season = seasonNumber
-                        this.episode = ep.episodeNumber
-                        this.posterUrl = fixUrl(ep.stillPath)
-                    })
+            val episodes = mutableListOf<Episode>()
+            result.seasons?.forEach { seasonItem ->
+                val seasonNumber = seasonItem.seasonNumber
+                Log.d("SWX", "seasonNumber » $seasonNumber")
+                seasonItem.episodes?.forEach { ep ->
+                    Log.d("SWX", "ep » $ep")
+                    val videoLink = ep.videos?.firstOrNull()?.link
+                    if (!videoLink.isNullOrBlank()) {
+                        episodes.add(newEpisode(videoLink) {
+                            this.name = ep.name
+                            this.season = seasonNumber
+                            this.episode = ep.episodeNumber
+                            this.posterUrl = fixUrl(ep.stillPath)
+                        })
+                    }
+                }
+            }
+
+            if (url.contains("/series/show/")) {
+                return newTvSeriesLoadResponse(title.trim(), url, TvType.TvSeries, episodes) {
+                    this.posterUrl = poster
+                    this.year = year
+                    this.plot = description
+                    this.tags = tags
+                    this.score = Score.from10(rating)
+                    addActors(actors)
+                    if (!trailer.isNullOrBlank()) {
+                        addTrailer(trailer)
+                    }
+                }
+            } else {
+                return newTvSeriesLoadResponse(title.trim(), url, TvType.Anime, episodes) {
+                    this.posterUrl = poster
+                    this.year = year
+                    this.plot = description
+                    this.tags = tags
+                    this.score = Score.from10(rating)
+                    addActors(actors)
+                    if (!trailer.isNullOrBlank()) {
+                        addTrailer(trailer)
+                    }
                 }
             }
         }
 
-        if (url.contains("/series/show/")) {
-            return newTvSeriesLoadResponse(title.trim(), url, TvType.TvSeries, episodes) {
-                this.posterUrl = poster
-                this.year = year
-                this.plot = description
-                this.tags = tags
-                this.score = Score.from10(rating)
-                addActors(actors)
-                if (!trailer.isNullOrBlank()) {
-                    addTrailer(trailer)
-                }
-            }
-        } else {
-            return newTvSeriesLoadResponse(title.trim(), url, TvType.Anime, episodes) {
-                this.posterUrl = poster
-                this.year = year
-                this.plot = description
-                this.tags = tags
-                this.score = Score.from10(rating)
-                addActors(actors)
-                if (!trailer.isNullOrBlank()) {
-                    addTrailer(trailer)
-                }
-            }
+        // Fallback to TMDB if SineWix API returns null/401
+        val id = (if (url.contains("/series/show/")) url.substringAfter("/series/show/") else url.substringAfter("/animes/show/")).substringBefore("/").toIntOrNull()
+        if (id != null) {
+            return loadTmdbTv(id)
         }
+        return null
     }
 
     override suspend fun loadLinks(
@@ -423,6 +441,29 @@ class SineWix : MainAPI() {
                     this.headers = headers
                 }
             )
+        } else if (data.startsWith("tmdb:")) {
+            val parts = data.split(":")
+            if (parts.size == 2) { // movie
+                val tmdbId = parts[1]
+                listOf(
+                    "https://vidsrc.me/embed/movie/$tmdbId",
+                    "https://vidsrc.to/embed/movie/$tmdbId",
+                    "https://autoembed.co/movie/tmdb/$tmdbId"
+                ).forEach { embedUrl ->
+                    try { loadExtractor(embedUrl, mainUrl, subtitleCallback, callback) } catch (_: Throwable) {}
+                }
+            } else if (parts.size >= 4) { // tv
+                val tmdbId = parts[1]
+                val season = parts[2]
+                val episode = parts[3]
+                listOf(
+                    "https://vidsrc.me/embed/tv/$tmdbId/$season/$episode",
+                    "https://vidsrc.to/embed/tv/$tmdbId/$season/$episode",
+                    "https://autoembed.co/tv/tmdb/$tmdbId-$season-$episode"
+                ).forEach { embedUrl ->
+                    try { loadExtractor(embedUrl, mainUrl, subtitleCallback, callback) } catch (_: Throwable) {}
+                }
+            }
         } else if (data.startsWith("http://") || data.startsWith("https://")) {
             loadExtractor(data, "${mainUrl}/", subtitleCallback, callback)
         }
