@@ -61,24 +61,24 @@
     "fileHash": "sha256-bd55d711854d0e7146baa7586c94bc03dfd1f33b842c8d8744d12090629ab013"
   },
   {
-    "url": "https://raw.githubusercontent.com/csprofesor/gsrepo/builds/DDizi.cs3?v=f764b26566242aea2ef9921adaa0e1abba068a46caf06a0ecb838baec580a558",
+    "url": "https://raw.githubusercontent.com/csprofesor/gsrepo/builds/DDizi.cs3?v=9be3779becafaaeb942493547250c16b354eb79ca9e09397d88ff83a64a40dde",
     "status": 1,
-    "version": 1,
+    "version": 2,
     "name": "DDizi",
     "internalName": "DDizi",
     "authors": [
       "csprofesor"
     ],
-    "description": "Ddizi, dizi izle, dizi seyret, ddizi.im - Güncel ve eski dizileri en iyi görüntü kalitesiyle bulabileceğiniz dizi izleme sitesi.",
-    "fileSize": 31697,
+    "description": "Ddizi, dizi izle, dizi seyret, ddizi.tel - Güncel ve eski dizileri en iyi görüntü kalitesiyle bulabileceğiniz dizi izleme sitesi.",
+    "fileSize": 31705,
     "repositoryUrl": "https://github.com/csprofesor/gsrepo",
     "language": "tr",
     "tvTypes": [
       "TvSeries"
     ],
-    "iconUrl": "https://www.google.com/s2/favicons?domain=ddizi.im&sz=%size%",
+    "iconUrl": "https://www.google.com/s2/favicons?domain=ddizi.tel&sz=%size%",
     "apiVersion": 1,
-    "fileHash": "sha256-f764b26566242aea2ef9921adaa0e1abba068a46caf06a0ecb838baec580a558"
+    "fileHash": "sha256-9be3779becafaaeb942493547250c16b354eb79ca9e09397d88ff83a64a40dde"
   },
   {
     "url": "https://raw.githubusercontent.com/csprofesor/gsrepo/builds/DiziBox.cs3?v=556321b847ea83865f11effeebeaa17a2e3bbb394ae2910ac53205c7f6046235",
