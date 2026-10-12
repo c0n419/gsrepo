@@ -8,6 +8,7 @@ import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
 import com.lagradost.cloudstream3.utils.AppUtils.tryParseJson
 import org.jsoup.nodes.Element
+import java.util.Collections
 
 data class FullHDFilmSearchItem(
     val id: Long? = null,
@@ -49,6 +50,8 @@ class FullHDFilm : MainAPI() {
     override val hasQuickSearch       = false
     override val supportedTypes       = setOf(TvType.Movie, TvType.TvSeries)
 
+    private val seenUrls = Collections.synchronizedSet(HashSet<String>())
+
     override val mainPage = mainPageOf(
         "${mainUrl}/turkce-altyazili-filmler-izle-3/" to "Türkçe Altyazılı",
         "${mainUrl}/tur/yerli-film-izle-1/"            to "Yerli Film",
@@ -76,11 +79,42 @@ class FullHDFilm : MainAPI() {
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
+        val firstCategory = mainPage.firstOrNull()
+        if (page == 1 && (firstCategory == null || request.data == firstCategory.data || request.name == firstCategory.name)) {
+            seenUrls.clear()
+        }
+
         val baseUrl = request.data.removeSuffix("/")
-        val url = if (page == 1) request.data else "${baseUrl}/page/${page}/"
-        val document = app.get(url).document
-        val movieBoxes = document.select("a.poster")
-        val home = movieBoxes.mapNotNull { it.toSearchResult() }
+        val home = mutableListOf<SearchResponse>()
+
+        if (page == 1) {
+            var currentPage = 1
+            while (home.size < 15 && currentPage <= 3) {
+                val url = if (currentPage == 1) request.data else "${baseUrl}/page/${currentPage}/"
+                val document = try { app.get(url).document } catch (e: Exception) { null } ?: break
+                val movieBoxes = document.select("a.poster")
+                if (movieBoxes.isEmpty()) break
+
+                for (box in movieBoxes) {
+                    val res = box.toSearchResult() ?: continue
+                    if (seenUrls.add(res.url)) {
+                        home.add(res)
+                        if (home.size >= 20) break
+                    }
+                }
+                currentPage++
+            }
+        } else {
+            val url = "${baseUrl}/page/${page}/"
+            val document = app.get(url).document
+            val movieBoxes = document.select("a.poster")
+            for (box in movieBoxes) {
+                val res = box.toSearchResult() ?: continue
+                if (seenUrls.add(res.url)) {
+                    home.add(res)
+                }
+            }
+        }
 
         return newHomePageResponse(request.name, home)
     }
