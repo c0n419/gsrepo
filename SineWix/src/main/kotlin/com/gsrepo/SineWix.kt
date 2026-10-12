@@ -90,17 +90,17 @@ class SineWix : MainAPI() {
     }
 
     override val mainPage = mainPageOf(
-        "/genres/topteen/all/$apiKey" to "Top 10 Listesi",
-        "/genres/latestmovies/all/$apiKey" to "Son Eklenen Filmler",
-        "/genres/latestseries/all/$apiKey" to "Son Eklenen Diziler",
-        "/genres/latestanimes/all/$apiKey" to "Son Eklenen Animeler",
-        "/genres/movies/show/28/$apiKey" to "Aksiyon Filmleri",
-        "/genres/movies/show/35/$apiKey" to "Komedi Filmleri",
-        "/genres/movies/show/27/$apiKey" to "Korku Filmleri",
-        "/genres/movies/show/878/$apiKey" to "Bilim Kurgu Filmleri",
-        "/genres/movies/show/12/$apiKey" to "Macera Filmleri",
-        "/genres/series/show/18/$apiKey" to "Dram Dizileri",
-        "/genres/animes/show/16/$apiKey" to "Animasyon",
+        "/api/genres/topteen/all/$apiKey" to "Top 10 Listesi",
+        "/api/genres/latestmovies/all/$apiKey" to "Son Eklenen Filmler",
+        "/api/genres/latestseries/all/$apiKey" to "Son Eklenen Diziler",
+        "/api/genres/latestanimes/all/$apiKey" to "Son Eklenen Animeler",
+        "/api/genres/movies/show/28/$apiKey" to "Aksiyon Filmleri",
+        "/api/genres/movies/show/35/$apiKey" to "Komedi Filmleri",
+        "/api/genres/movies/show/27/$apiKey" to "Korku Filmleri",
+        "/api/genres/movies/show/878/$apiKey" to "Bilim Kurgu Filmleri",
+        "/api/genres/movies/show/12/$apiKey" to "Macera Filmleri",
+        "/api/genres/series/show/18/$apiKey" to "Dram Dizileri",
+        "/api/genres/animes/show/16/$apiKey" to "Animasyon",
     )
 
     private fun hmacSha256(key: String, data: String): String {
@@ -119,10 +119,10 @@ class SineWix : MainAPI() {
         nonce: String,
         timestamp: String
     ): String {
-        val iv = Base64.decode(ivBase64, Base64.DEFAULT)
-        val tag = Base64.decode(tagBase64, Base64.DEFAULT)
-        val aad = Base64.decode(aadBase64, Base64.DEFAULT)
-        val cipherBytes = Base64.decode(ciphertextBase64, Base64.DEFAULT)
+        val iv = Base64.decode(ivBase64, Base64.DEFAULT or Base64.URL_SAFE)
+        val tag = Base64.decode(tagBase64, Base64.DEFAULT or Base64.URL_SAFE)
+        val aad = Base64.decode(aadBase64, Base64.DEFAULT or Base64.URL_SAFE)
+        val cipherBytes = Base64.decode(ciphertextBase64, Base64.DEFAULT or Base64.URL_SAFE)
 
         val keyString = "easyplex-response-v1|$sessionId|$nonce|$timestamp"
         val mac = Mac.getInstance("HmacSHA256")
@@ -141,13 +141,18 @@ class SineWix : MainAPI() {
     }
 
     private suspend fun apiCall(urlPath: String, method: String = "GET", formData: Map<String, String>? = null): String? {
-        val fullUrl = if (urlPath.startsWith("http")) urlPath else "https://ydfvfdizipanel.ru/public$urlPath"
+        val fullUrl = when {
+            urlPath.startsWith("http") -> urlPath
+            urlPath.startsWith("/api/") -> "https://ydfvfdizipanel.ru/public$urlPath"
+            else -> "https://ydfvfdizipanel.ru/public/api$urlPath"
+        }
+
         val cleanPath = if (urlPath.contains("?")) urlPath.substringBefore("?") else urlPath
-        val apiPath = if (cleanPath.contains("/api/")) "/api/" + cleanPath.substringAfter("/api/") else cleanPath
+        val apiPath = if (cleanPath.startsWith("/api/")) cleanPath else "/api$cleanPath"
 
         val timestamp = (System.currentTimeMillis() / 1000).toString()
         val nonceBytes = ByteArray(24).apply { SecureRandom().nextBytes(this) }
-        val nonce = Base64.encodeToString(nonceBytes, Base64.NO_WRAP or Base64.URL_SAFE or Base64.NO_PADDING)
+        val nonce = Base64.encodeToString(nonceBytes, Base64.NO_WRAP or Base64.URL_SAFE)
 
         val bodyBytes: ByteArray
         val contentType: String?
@@ -259,7 +264,7 @@ class SineWix : MainAPI() {
         val maxPagesToFetch = if (page == 1) 3 else 1
 
         while (itemsList.size < 12 && currentPage <= page + maxPagesToFetch - 1) {
-            val urlPath = "$baseUrlPath?page=$currentPage"
+            val urlPath = if (baseUrlPath.startsWith("/api/")) "$baseUrlPath?page=$currentPage" else "/api$baseUrlPath?page=$currentPage"
             val resText = try {
                 apiCall(urlPath, "GET")
             } catch (_: Throwable) {
