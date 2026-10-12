@@ -349,9 +349,9 @@
     "fileHash": "sha256-2d737ad6ef8ae6ef6054e75aff8e949fa699c9057dd3973a48f9b8e03fd06aff"
   },
   {
-    "url": "https://raw.githubusercontent.com/csprofesor/gsrepo/builds/HintFilmIzle.cs3?v=5b48b1588e870ee9ff4d44dd5c73504664ecc1f2628837adb2eeb2b25fd047bb",
+    "url": "https://raw.githubusercontent.com/csprofesor/gsrepo/builds/HintFilmIzle.cs3?v=f6faf66bd81490f9d5511c266de102a6f4d467150a37be91d4ac2895905a2c12",
     "status": 1,
-    "version": 47,
+    "version": 48,
     "name": "HintFilmIzle",
     "internalName": "HintFilmIzle",
     "authors": [
@@ -367,7 +367,7 @@
     ],
     "iconUrl": "https://www.google.com/s2/favicons?domain=www.hintfilmizle.com&sz=%size%",
     "apiVersion": 1,
-    "fileHash": "sha256-5b48b1588e870ee9ff4d44dd5c73504664ecc1f2628837adb2eeb2b25fd047bb"
+    "fileHash": "sha256-f6faf66bd81490f9d5511c266de102a6f4d467150a37be91d4ac2895905a2c12"
   },
   {
     "url": "https://raw.githubusercontent.com/csprofesor/gsrepo/builds/JetFilmizle.cs3?v=1472a4fd418b77e82a5f21a15d838bc8a0a6b4a9c8189611c53c07df3dc916b9",
