@@ -42,6 +42,7 @@ import java.net.URI
 import java.net.URLDecoder
 import java.net.URLEncoder
 import java.util.ArrayDeque
+import java.util.Collections
 
 class HintFilmIzle : MainAPI() {
     override var mainUrl = "https://www.hintfilmizle.com"
@@ -88,6 +89,8 @@ class HintFilmIzle : MainAPI() {
         "$mainUrl/netflix-izle" to "Netflix"
     )
 
+    private val seenHomePageUrls = Collections.synchronizedSet(LinkedHashSet<String>())
+
     private fun fix(value: String?, base: String = mainUrl): String? {
         val raw = value?.replace("\\/", "/")?.replace("\\u0026", "&")?.replace("&amp;", "&")?.trim()?.takeIf { it.isNotBlank() } ?: return null
         return runCatching {
@@ -107,24 +110,41 @@ class HintFilmIzle : MainAPI() {
             if (bg.contains("url")) {
                 Regex("url\\(['\"]?([^'\")]+)['\"]?\\)").find(bg)?.groupValues?.get(1)?.let { fix(it) }?.let { return it }
             }
-            attrs.firstNotNullOfOrNull {
-                fix(img.attr(it))?.takeIf { u -> !u.startsWith("data:") && !u.contains("placeholder", true) }
+            attrs.firstNotNullOfOrNull { attr ->
+                fix(img.attr(attr))?.takeIf { u ->
+                    !u.startsWith("data:", ignoreCase = true) &&
+                    !u.contains("placeholder", ignoreCase = true) &&
+                    !u.contains("blank", ignoreCase = true) &&
+                    !u.contains("avatar", ignoreCase = true) &&
+                    !u.contains("1x1", ignoreCase = true)
+                }
             }?.let { return it }
         }
         return null
     }
 
     private fun cleanTitle(value: String?): String? = value?.trim()
+        ?.replace(Regex("^%\\d+\\s*"), "")
         ?.replace(Regex("\\s+"), " ")
         ?.replace(Regex("\\s+(Türkçe\\s+(Altyazı|Dublaj)|izle)\\s*$", RegexOption.IGNORE_CASE), "")
         ?.trim()
-        ?.takeIf { it.isNotBlank() && !it.equals("Giriş yap", true) && !it.equals("Oturum Aç", true) }
+        ?.takeIf { it.isNotBlank() && !it.equals("Giriş yap", true) && !it.equals("Oturum Aç", true) && !it.startsWith("%0") }
 
     private fun titleOf(card: Element): String? = sequenceOf(
-        card.selectFirst("h1")?.text(), card.selectFirst(".film-title")?.text(), card.selectFirst(".movie-title")?.text(),
-        card.selectFirst(".entry-title")?.text(), card.selectFirst(".single-title")?.text(), card.selectFirst(".post-title")?.text(),
-        card.selectFirst(".card-title")?.text(), card.selectFirst("h2")?.text(), card.selectFirst("h3")?.text(),
-        card.selectFirst(".title")?.text(), card.selectFirst(".name")?.text(), card.selectFirst("img")?.attr("alt"), card.attr("title"),
+        card.selectFirst("h1")?.text(),
+        card.selectFirst("h2")?.text(),
+        card.selectFirst("h3")?.text(),
+        card.selectFirst("h4")?.text(),
+        card.selectFirst(".film-title")?.text(),
+        card.selectFirst(".movie-title")?.text(),
+        card.selectFirst(".entry-title")?.text(),
+        card.selectFirst(".single-title")?.text(),
+        card.selectFirst(".post-title")?.text(),
+        card.selectFirst(".card-title")?.text(),
+        card.selectFirst(".title")?.text(),
+        card.selectFirst(".name")?.text(),
+        card.selectFirst("img")?.attr("alt"),
+        card.attr("title"),
         card.text()
     ).mapNotNull(::cleanTitle).firstOrNull()
 
@@ -155,7 +175,19 @@ class HintFilmIzle : MainAPI() {
         else newMovieSearchResponse(title, href, TvType.Movie) { posterUrl = card.poster(); score = Score.from10(rating(card)) }
     }
 
-    private fun cardFor(anchor: Element): Element = anchor.parents().firstOrNull { p -> p.select("img").isNotEmpty() && p.select("a[href*='/film/'],a[href*='/dizi/']").size <= 4 } ?: anchor
+    private fun cardFor(anchor: Element): Element {
+        anchor.parents().firstOrNull { p ->
+            val cls = p.className()
+            cls.contains("segment-poster") || cls.contains("poster-md") || cls.contains("movie-item") || cls.contains("film-box") || cls.contains("film-item") || p.select("h1, h2, h3, h4, .poster-subject").isNotEmpty()
+        }?.let { return it }
+        return anchor.parents().firstOrNull { p -> p.select("img").isNotEmpty() && p.select("a[href*='/film/'],a[href*='/dizi/']").size <= 4 } ?: anchor
+    }
+
+    private fun removeNoise(doc: Document): Document {
+        doc.select("aside, .sidebar, #primary-sidebar, .timing-list, .top-trend-list, header, footer, .header-wrapper").remove()
+        return doc
+    }
+
     private fun results(container: Element): List<SearchResponse> = container.select("a[href*='/film/'],a[href*='/dizi/'], .film-box a, .movie-item a, .item a, .film-item a").mapNotNull { a -> val card = cardFor(a); a.toResult(card) }.distinctBy { it.url }
 
     private fun recommendations(doc: Document, currentUrl: String): List<SearchResponse> {
@@ -184,14 +216,50 @@ class HintFilmIzle : MainAPI() {
     }
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
+        if (page <= 1 && request.data == mainPage.first().data) {
+            seenHomePageUrls.clear()
+        }
+
         val base = request.data.substringBefore("?").trimEnd('/')
         val q = request.data.substringAfter("?", "").takeIf { it.isNotBlank() }
         val url = if (page <= 1) request.data else base + "/page/$page/" + if (q != null) "?$q" else ""
+
         val response = runCatching { app.get(url, referer = "$mainUrl/", headers = headers(), interceptor = interceptor) }.getOrNull()
             ?: return newHomePageResponse(request.name, emptyList(), hasNext = false)
-        val doc = response.document
-        val r = results(doc)
-        return newHomePageResponse(request.name, r, hasNext = r.isNotEmpty())
+
+        val doc = removeNoise(response.document)
+        val initialResults = results(doc)
+
+        if (page > 1) {
+            return newHomePageResponse(request.name, initialResults, hasNext = initialResults.isNotEmpty())
+        }
+
+        val uniqueResults = initialResults.filter { item ->
+            val cleanUrl = item.url.substringBefore("?").substringBefore("#").trimEnd('/')
+            !seenHomePageUrls.contains(cleanUrl)
+        }.toMutableList()
+
+        if (uniqueResults.size < 8 && !request.data.contains("netflix", ignoreCase = true)) {
+            val p2Url = base + "/page/2/" + if (q != null) "?$q" else ""
+            val p2Response = runCatching { app.get(p2Url, referer = "$mainUrl/", headers = headers(), interceptor = interceptor) }.getOrNull()
+            if (p2Response != null) {
+                val p2Doc = removeNoise(p2Response.document)
+                val p2Results = results(p2Doc)
+                for (item in p2Results) {
+                    val cleanUrl = item.url.substringBefore("?").substringBefore("#").trimEnd('/')
+                    if (!seenHomePageUrls.contains(cleanUrl) && uniqueResults.none { it.url.substringBefore("?").substringBefore("#").trimEnd('/') == cleanUrl }) {
+                        uniqueResults.add(item)
+                        if (uniqueResults.size >= 10) break
+                    }
+                }
+            }
+        }
+
+        uniqueResults.forEach { item ->
+            seenHomePageUrls.add(item.url.substringBefore("?").substringBefore("#").trimEnd('/'))
+        }
+
+        return newHomePageResponse(request.name, uniqueResults, hasNext = uniqueResults.isNotEmpty())
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
