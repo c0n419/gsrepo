@@ -239,6 +239,10 @@ class HintFilmIzle : MainAPI() {
             !seenHomePageUrls.contains(cleanUrl)
         }.toMutableList()
 
+        if (request.data.contains("animasyon-filmleri", ignoreCase = true) && uniqueResults.isNotEmpty()) {
+            uniqueResults.removeAt(0)
+        }
+
         if (uniqueResults.size < 8 && !request.data.contains("netflix", ignoreCase = true)) {
             val p2Url = base + "/page/2/" + if (q != null) "?$q" else ""
             val p2Response = runCatching { app.get(p2Url, referer = "$mainUrl/", headers = headers(), interceptor = interceptor) }.getOrNull()
