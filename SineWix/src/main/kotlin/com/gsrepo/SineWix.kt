@@ -35,6 +35,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import java.net.URLEncoder
 import java.security.MessageDigest
 import java.security.SecureRandom
+import java.util.Collections
 import javax.crypto.Cipher
 import javax.crypto.Mac
 import javax.crypto.spec.GCMParameterSpec
@@ -81,6 +82,8 @@ class SineWix : MainAPI() {
     @Volatile
     private var cachedToken: CachedToken? = null
 
+    private val seenMediaIds = Collections.synchronizedSet(HashSet<Int>())
+
     private val jsonMapper = ObjectMapper().apply {
         registerModule(KotlinModule.Builder().build())
         configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
@@ -91,9 +94,13 @@ class SineWix : MainAPI() {
         "/genres/latestmovies/all/$apiKey" to "Son Eklenen Filmler",
         "/genres/latestseries/all/$apiKey" to "Son Eklenen Diziler",
         "/genres/latestanimes/all/$apiKey" to "Son Eklenen Animeler",
-        "/genres/movies/all/$apiKey" to "Filmler",
-        "/genres/series/all/$apiKey" to "Diziler",
-        "/genres/animes/all/$apiKey" to "Animeler",
+        "/genres/movies/show/28/$apiKey" to "Aksiyon Filmleri",
+        "/genres/movies/show/35/$apiKey" to "Komedi Filmleri",
+        "/genres/movies/show/27/$apiKey" to "Korku Filmleri",
+        "/genres/movies/show/878/$apiKey" to "Bilim Kurgu Filmleri",
+        "/genres/movies/show/12/$apiKey" to "Macera Filmleri",
+        "/genres/series/show/18/$apiKey" to "Dram Dizileri",
+        "/genres/animes/show/16/$apiKey" to "Animasyon",
     )
 
     private fun hmacSha256(key: String, data: String): String {
@@ -242,26 +249,59 @@ class SineWix : MainAPI() {
     }
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        val urlPath = "${request.data}?page=$page"
-        val resText = try {
-            apiCall(urlPath, "GET")
-        } catch (_: Throwable) {
-            null
+        if (page == 1 && request.data == mainPage.first().data) {
+            seenMediaIds.clear()
         }
 
-        val result = if (!resText.isNullOrBlank()) {
-            try { jsonMapper.readValue(resText, SineSonuc::class.java) } catch (_: Throwable) { null }
-        } else null
+        val baseUrlPath = request.data
+        val itemsList = mutableListOf<SearchResponse>()
+        var currentPage = page
+        val maxPagesToFetch = if (page == 1) 3 else 1
 
-        val home = result?.data?.mapNotNull { it.toSearchResponse() } ?: emptyList()
+        while (itemsList.size < 12 && currentPage <= page + maxPagesToFetch - 1) {
+            val urlPath = "$baseUrlPath?page=$currentPage"
+            val resText = try {
+                apiCall(urlPath, "GET")
+            } catch (_: Throwable) {
+                null
+            }
 
-        return newHomePageResponse(request.name, home)
+            val result = if (!resText.isNullOrBlank()) {
+                try { jsonMapper.readValue(resText, SineSonuc::class.java) } catch (_: Throwable) { null }
+            } else null
+
+            val rawItems = result?.data ?: emptyList()
+            if (rawItems.isEmpty()) break
+
+            for (item in rawItems) {
+                val searchResp = item.toSearchResponse(filterDuplicates = (page == 1))
+                if (searchResp != null) {
+                    itemsList.add(searchResp)
+                    if (itemsList.size >= 12 && page == 1) break
+                }
+            }
+            currentPage++
+        }
+
+        return newHomePageResponse(request.name, itemsList)
     }
 
-    private fun SineData.toSearchResponse(): SearchResponse? {
+    private fun SineData.toSearchResponse(filterDuplicates: Boolean = false): SearchResponse? {
         val title = this.title ?: this.name ?: return null
         val id = this.id ?: return null
-        val posterUrl = fixUrl(this.posterPath ?: this.backdropPath)
+
+        val rawPoster = this.posterPath?.trim()?.ifBlank { null }
+            ?: this.backdropPath?.trim()?.ifBlank { null }
+            ?: return null
+
+        val posterUrl = fixUrl(rawPoster) ?: return null
+
+        if (filterDuplicates) {
+            if (!seenMediaIds.add(id)) {
+                return null
+            }
+        }
+
         val score = when (val v = this.vote) {
             is Number -> v.toDouble()
             is String -> v.toDoubleOrNull()
@@ -308,7 +348,7 @@ class SineWix : MainAPI() {
         }
 
         val items = result?.results ?: result?.search ?: emptyList()
-        return items.mapNotNull { it.toSearchResponse() }
+        return items.mapNotNull { it.toSearchResponse(filterDuplicates = false) }
     }
 
     override suspend fun quickSearch(query: String): List<SearchResponse> = search(query)
