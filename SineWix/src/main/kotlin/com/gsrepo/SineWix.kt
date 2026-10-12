@@ -32,6 +32,8 @@ import com.lagradost.cloudstream3.utils.loadExtractor
 import com.lagradost.cloudstream3.utils.newExtractorLink
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.RequestBody.Companion.toRequestBody
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.net.URLEncoder
 import java.security.MessageDigest
 import java.security.SecureRandom
@@ -224,30 +226,34 @@ class SineWix : MainAPI() {
         return rawText
     }
 
+    private val tokenMutex = Mutex()
+
     private suspend fun getOrFetchToken(): CachedToken? {
-        val now = System.currentTimeMillis() / 1000
-        val curr = cachedToken
-        if (curr != null && curr.expiresAt > now + 60) {
-            return curr
+        tokenMutex.withLock {
+            val now = System.currentTimeMillis() / 1000
+            val curr = cachedToken
+            if (curr != null && curr.expiresAt > now + 60) {
+                return curr
+            }
+            val form = mapOf(
+                "signature" to hash256,
+                "package_name" to "com.wxsmash.game",
+                "device_id" to "android_1234567890abcdef",
+                "nonce" to "",
+                "timestamp" to "",
+                "app_version" to "2.5.3",
+                "app_id" to "sinewix-mobile",
+                "platform" to "android"
+            )
+            val resText = apiCall("/api/tokens/mobile/generate", "POST", form) ?: return null
+            val tokenObj = jsonMapper.readValue(resText, SineTokenResponse::class.java)
+            val accessToken = tokenObj.accessToken ?: return null
+            val sessionId = tokenObj.sessionId ?: ""
+            val expiresIn = tokenObj.expiresIn ?: 86400
+            val newToken = CachedToken(accessToken, sessionId, now + expiresIn)
+            cachedToken = newToken
+            return newToken
         }
-        val form = mapOf(
-            "signature" to hash256,
-            "package_name" to "com.wxsmash.game",
-            "device_id" to "android_1234567890abcdef",
-            "nonce" to "",
-            "timestamp" to "",
-            "app_version" to "2.5.3",
-            "app_id" to "sinewix-mobile",
-            "platform" to "android"
-        )
-        val resText = apiCall("/api/tokens/mobile/generate", "POST", form) ?: return null
-        val tokenObj = jsonMapper.readValue(resText, SineTokenResponse::class.java)
-        val accessToken = tokenObj.accessToken ?: return null
-        val sessionId = tokenObj.sessionId ?: ""
-        val expiresIn = tokenObj.expiresIn ?: 86400
-        val newToken = CachedToken(accessToken, sessionId, now + expiresIn)
-        cachedToken = newToken
-        return newToken
     }
 
     private fun fixUrl(url: String?): String? {
