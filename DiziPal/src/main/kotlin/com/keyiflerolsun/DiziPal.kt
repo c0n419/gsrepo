@@ -93,7 +93,6 @@ class DiziPal : MainAPI() {
         "$mainUrl/platform/gain"         to "GAİN",
         "$mainUrl/platform/max"          to "Max",
         "$mainUrl/platform/prime-video"  to "Prime Video",
-        "$mainUrl/platform/tabii"        to "tabii",
         "$mainUrl/kategori/aksiyon"      to "Aksiyon",
         "$mainUrl/kategori/komedi"       to "Komedi",
         "$mainUrl/kategori/dram"         to "Dram",
