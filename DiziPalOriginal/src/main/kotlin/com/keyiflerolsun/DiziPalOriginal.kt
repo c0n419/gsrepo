@@ -4,6 +4,7 @@ package com.keyiflerolsun
 
 import android.util.Base64
 import android.util.Log
+import java.util.Collections
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
 import com.lagradost.cloudstream3.HomePageResponse
@@ -231,35 +232,65 @@ class DiziPalOriginal : MainAPI() {
         }
     }
 
+    private val seenUrls = Collections.synchronizedSet(HashSet<String>())
+
+    private fun String.toNormalizedPath(): String {
+        return this.replace(Regex("""https?://[^/]+"""), "")
+            .substringBefore("?")
+            .substringBefore("#")
+            .trimEnd('/')
+    }
+
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
+        val firstCategory = mainPage.firstOrNull()
+        if (page == 1 && (firstCategory == null || request.data == firstCategory.data || request.name == firstCategory.name)) {
+            seenUrls.clear()
+        }
+
         val home = mutableListOf<SearchResponse>()
 
         try {
             val targetUrl = request.data.replace(Regex("""https?://(dizipal\d*|ctutu|dizipal)\.[a-z0-9]+"""), mainUrl)
-            val url = if (page > 1) {
-                if (targetUrl.contains("?")) "$targetUrl&page=$page" else "$targetUrl?page=$page"
-            } else {
-                targetUrl
-            }
+            var currentPage = if (page > 1) page else 1
 
-            val document = app.get(
-                url, timeout = 10000, interceptor = interceptor, headers = getHeaders(mainUrl)
-            ).document
+            while (home.size < 12 && currentPage <= (if (page > 1) page else 3)) {
+                val fetchUrl = if (currentPage == 1) {
+                    targetUrl
+                } else {
+                    if (targetUrl.contains("?")) "$targetUrl&page=$currentPage" else "$targetUrl?page=$currentPage"
+                }
 
-            val cardElements = document.select(cardSelector)
-            val pageResults = cardElements.mapNotNull { it.diziler() }
-            if (pageResults.isNotEmpty()) {
-                home.addAll(pageResults)
-            } else {
-                val fallbackLinks = document.select("a[href*='/dizi/'], a[href*='/film/']")
-                home.addAll(fallbackLinks.mapNotNull { it.diziler() })
+                val document = try {
+                    app.get(
+                        fetchUrl, timeout = 10000, interceptor = interceptor, headers = getHeaders(mainUrl)
+                    ).document
+                } catch (_: Exception) { null } ?: break
+
+                val cardElements = document.select(cardSelector)
+                val pageResults = if (cardElements.isNotEmpty()) {
+                    cardElements.mapNotNull { it.diziler() }
+                } else {
+                    val fallbackLinks = document.select("a[href*='/dizi/'], a[href*='/film/']")
+                    fallbackLinks.mapNotNull { it.diziler() }
+                }
+
+                if (pageResults.isEmpty()) break
+
+                for (item in pageResults) {
+                    val normPath = item.url.toNormalizedPath()
+                    if (normPath.isNotBlank() && seenUrls.add(normPath)) {
+                        home.add(item)
+                    }
+                }
+
+                if (page > 1) break
+                currentPage++
             }
         } catch (e: Exception) {
             Log.e("DiziPalOriginal", "getMainPage Hatası: ${e.message}")
         }
 
-        val items = home.distinctBy { it.url }
-        return newHomePageResponse(request.name, items, items.isNotEmpty())
+        return newHomePageResponse(request.name, home, hasNext = home.isNotEmpty())
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
