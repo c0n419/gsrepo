@@ -71,7 +71,8 @@ class SineWix : MainAPI() {
     private val headers = mapOf(
         "signature" to sigCert,
         "hash256" to hash256,
-        "user-agent" to "EasyPlex (Android 13; SM-A546E; samsung; tr)",
+        "Accept" to "application/json",
+        "User-Agent" to "EasyPlex (Android 13; SM-A546E; samsung; tr)",
         "X-App-Id" to "sinewix-mobile",
         "X-Platform" to "android",
         "packagename" to "com.wxsmash.game",
@@ -119,10 +120,10 @@ class SineWix : MainAPI() {
         nonce: String,
         timestamp: String
     ): String {
-        val iv = Base64.decode(ivBase64, Base64.DEFAULT or Base64.URL_SAFE)
-        val tag = Base64.decode(tagBase64, Base64.DEFAULT or Base64.URL_SAFE)
-        val aad = Base64.decode(aadBase64, Base64.DEFAULT or Base64.URL_SAFE)
-        val cipherBytes = Base64.decode(ciphertextBase64, Base64.DEFAULT or Base64.URL_SAFE)
+        val iv = Base64.decode(ivBase64, Base64.DEFAULT)
+        val tag = Base64.decode(tagBase64, Base64.DEFAULT)
+        val aad = Base64.decode(aadBase64, Base64.DEFAULT)
+        val cipherBytes = Base64.decode(ciphertextBase64, Base64.DEFAULT)
 
         val keyString = "easyplex-response-v1|$sessionId|$nonce|$timestamp"
         val mac = Mac.getInstance("HmacSHA256")
@@ -203,17 +204,21 @@ class SineWix : MainAPI() {
             app.get(fullUrl, headers = reqHeaders)
         }
 
-        val encHeader = response.headers["X-Content-Encrypted"]
-        val respSessionId = response.headers["X-Session-Id"] ?: (cachedToken?.sessionId ?: "")
+        val encHeader = response.headers.toMap().entries.firstOrNull { it.key.equals("X-Content-Encrypted", ignoreCase = true) }?.value
+        val respSessionId = response.headers.toMap().entries.firstOrNull { it.key.equals("X-Session-Id", ignoreCase = true) }?.value ?: (cachedToken?.sessionId ?: "")
         val rawText = response.text
 
         if (encHeader == "AES-256-GCM") {
             val jsonNode = jsonMapper.readTree(rawText)
-            val iv = jsonNode.get("iv").asText()
-            val tag = jsonNode.get("tag").asText()
-            val aad = jsonNode.get("aad").asText()
-            val ciphertext = jsonNode.get("ciphertext").asText()
-            return decryptGcmResponse(ciphertext, iv, tag, aad, respSessionId, nonce, timestamp)
+            val iv = jsonNode.get("iv")?.asText() ?: return rawText
+            val tag = jsonNode.get("tag")?.asText() ?: return rawText
+            val aad = jsonNode.get("aad")?.asText() ?: return rawText
+            val ciphertext = jsonNode.get("ciphertext")?.asText() ?: return rawText
+            return try {
+                decryptGcmResponse(ciphertext, iv, tag, aad, respSessionId, nonce, timestamp)
+            } catch (e: Exception) {
+                rawText
+            }
         }
 
         return rawText
