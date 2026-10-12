@@ -50,26 +50,34 @@ class FullHDFilm : MainAPI() {
     override val supportedTypes       = setOf(TvType.Movie, TvType.TvSeries)
 
     override val mainPage = mainPageOf(
-        "${mainUrl}/tur/turkce-altyazili-film-izle-3" to "Altyazılı Filmler",
-        "${mainUrl}/tur/yerli-film-izle-1"            to "Yerli Film",
-        "${mainUrl}/yabanci-dizi-izle-3"              to "Yabancı Diziler",
-        "${mainUrl}/en-cok-izlenen-filmler-hd-2"       to "En Çok İzlenenler",
-        "${mainUrl}/category/aksiyon-2"               to "Aksiyon",
-        "${mainUrl}/category/animasyon-1"             to "Animasyon",
-        "${mainUrl}/category/bilim-kurgu-1"           to "Bilim Kurgu",
-        "${mainUrl}/category/dram-1"                  to "Dram",
-        "${mainUrl}/category/fantastik-1"             to "Fantastik",
-        "${mainUrl}/category/gerilim-1"               to "Gerilim",
-        "${mainUrl}/category/komedi-1"                to "Komedi",
-        "${mainUrl}/category/korku-1"                 to "Korku",
-        "${mainUrl}/category/macera-1"                to "Macera",
-        "${mainUrl}/category/romantik-1"              to "Romantik",
-        "${mainUrl}/category/savas-1"                 to "Savaş",
-        "${mainUrl}/category/suc-1"                   to "Suç"
+        "${mainUrl}/turkce-altyazili-filmler-izle-3/" to "Türkçe Altyazılı",
+        "${mainUrl}/tur/yerli-film-izle-1/"            to "Yerli Film",
+        "${mainUrl}/yabanci-dizi-izle-3/"              to "Yabancı Diziler",
+        "${mainUrl}/en-cok-izlenen-filmler-hd-2/"       to "En Çok İzlenenler",
+        "${mainUrl}/tur/aile-1/"                       to "Aile",
+        "${mainUrl}/tur/aksiyon-2/"                    to "Aksiyon",
+        "${mainUrl}/tur/animasyon-1/"                  to "Animasyon",
+        "${mainUrl}/tur/belgesel/"                     to "Belgesel",
+        "${mainUrl}/tur/bilim-kurgu-1/"                to "Bilim Kurgu",
+        "${mainUrl}/tur/dram-1/"                       to "Dram",
+        "${mainUrl}/tur/fantastik-1/"                  to "Fantastik",
+        "${mainUrl}/tur/gerilim-1/"                    to "Gerilim",
+        "${mainUrl}/tur/gizem-1/"                      to "Gizem",
+        "${mainUrl}/tur/komedi-1/"                     to "Komedi",
+        "${mainUrl}/tur/korku-1/"                      to "Korku",
+        "${mainUrl}/tur/macera-1/"                     to "Macera",
+        "${mainUrl}/tur/muzik/"                        to "Müzik",
+        "${mainUrl}/tur/romantik-1/"                   to "Romantik",
+        "${mainUrl}/tur/savas-1/"                      to "Savaş",
+        "${mainUrl}/tur/suc-1/"                        to "Suç",
+        "${mainUrl}/tur/tarih-1/"                      to "Tarih",
+        "${mainUrl}/tur/tv-film-1/"                    to "TV Film",
+        "${mainUrl}/tur/vahsi-bati/"                   to "Vahşi Batı"
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        val url = if (page == 1) request.data else "${request.data}/page/${page}"
+        val baseUrl = request.data.removeSuffix("/")
+        val url = if (page == 1) request.data else "${baseUrl}/page/${page}/"
         val document = app.get(url).document
         val movieBoxes = document.select("a.poster")
         val home = movieBoxes.mapNotNull { it.toSearchResult() }
@@ -77,10 +85,47 @@ class FullHDFilm : MainAPI() {
         return newHomePageResponse(request.name, home)
     }
 
+    private fun Element.extractPosterUrl(): String? {
+        val img = this.selectFirst("img")
+        if (img != null) {
+            val srcList = listOf(
+                img.attr("data-src"),
+                img.attr("data-srcset"),
+                img.attr("data-original"),
+                img.attr("src")
+            )
+            for (src in srcList) {
+                if (src.isNotBlank() && !src.startsWith("data:")) {
+                    val cleanSrc = src.split(" ").firstOrNull()
+                    val fixed = fixUrlNull(cleanSrc)
+                    if (!fixed.isNullOrBlank()) return fixed
+                }
+            }
+        }
+
+        for (source in this.select("source")) {
+            val srcList = listOf(
+                source.attr("data-srcset"),
+                source.attr("srcset"),
+                source.attr("data-src"),
+                source.attr("src")
+            )
+            for (src in srcList) {
+                if (src.isNotBlank() && !src.startsWith("data:")) {
+                    val cleanSrc = src.split(" ").firstOrNull()
+                    val fixed = fixUrlNull(cleanSrc)
+                    if (!fixed.isNullOrBlank()) return fixed
+                }
+            }
+        }
+
+        return null
+    }
+
     private fun Element.toSearchResult(): SearchResponse? {
         val title     = this.attr("title").ifBlank { this.selectFirst("h2.title")?.text() } ?: return null
         val href      = fixUrlNull(this.attr("href")) ?: return null
-        val posterUrl = fixUrlNull(this.selectFirst("img")?.attr("data-src") ?: this.selectFirst("img")?.attr("src"))
+        val posterUrl = this.extractPosterUrl()
         val isTv      = href.contains("/dizi/")
 
         return if (isTv) {
@@ -131,7 +176,10 @@ class FullHDFilm : MainAPI() {
         val document = app.get(url).document
 
         val title       = document.selectFirst("h1")?.text() ?: document.selectFirst("meta[property='og:title']")?.attr("content") ?: return null
-        val poster      = fixUrlNull(document.selectFirst("div.poster img")?.attr("data-src") ?: document.selectFirst("div.poster img")?.attr("src"))
+        val poster      = fixUrlNull(document.selectFirst("meta[property='og:image']")?.attr("content"))
+            ?: document.selectFirst("picture.poster-auto, div.poster, picture")?.extractPosterUrl()
+            ?: fixUrlNull(document.selectFirst("picture img, div.poster img")?.attr("data-src"))
+            ?: fixUrlNull(document.selectFirst("picture img, div.poster img")?.attr("src")?.takeIf { !it.startsWith("data:") })
         val description = document.selectFirst("div.film")?.text()?.trim()
             ?: document.selectFirst("meta[property='og:description']")?.attr("content")?.trim()
             ?: document.selectFirst("div.poster-desc")?.text()?.trim()
