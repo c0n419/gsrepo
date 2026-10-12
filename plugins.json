@@ -349,7 +349,7 @@
     "fileHash": "sha256-2d737ad6ef8ae6ef6054e75aff8e949fa699c9057dd3973a48f9b8e03fd06aff"
   },
   {
-    "url": "https://raw.githubusercontent.com/csprofesor/gsrepo/builds/HintFilmIzle.cs3?v=ba7306bf8f1b895a02cdcf5bfe9613b0f05f7df5a514386d15e08b71bfe4e146",
+    "url": "https://raw.githubusercontent.com/csprofesor/gsrepo/builds/HintFilmIzle.cs3?v=5b48b1588e870ee9ff4d44dd5c73504664ecc1f2628837adb2eeb2b25fd047bb",
     "status": 1,
     "version": 47,
     "name": "HintFilmIzle",
@@ -358,7 +358,7 @@
       "csprofesor"
     ],
     "description": "HintFilmizle.com Hint filmleri, yabancı filmler ve diziler",
-    "fileSize": 58153,
+    "fileSize": 57597,
     "repositoryUrl": "https://github.com/csprofesor/gsrepo",
     "language": "tr",
     "tvTypes": [
@@ -367,7 +367,7 @@
     ],
     "iconUrl": "https://www.google.com/s2/favicons?domain=www.hintfilmizle.com&sz=%size%",
     "apiVersion": 1,
-    "fileHash": "sha256-ba7306bf8f1b895a02cdcf5bfe9613b0f05f7df5a514386d15e08b71bfe4e146"
+    "fileHash": "sha256-5b48b1588e870ee9ff4d44dd5c73504664ecc1f2628837adb2eeb2b25fd047bb"
   },
   {
     "url": "https://raw.githubusercontent.com/csprofesor/gsrepo/builds/JetFilmizle.cs3?v=1472a4fd418b77e82a5f21a15d838bc8a0a6b4a9c8189611c53c07df3dc916b9",
