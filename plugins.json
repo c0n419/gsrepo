@@ -286,7 +286,7 @@
     "fileHash": "sha256-f0f64f904daf14bdf195b5e8ef27db57de7fd9d9b04988bd583f0ea62d3cf551"
   },
   {
-    "url": "https://raw.githubusercontent.com/csprofesor/gsrepo/builds/FullHDFilm.cs3?v=f96a5da7e613f706ecb57a43347315615e612343a2fa08dc2d31f81e6114f78c",
+    "url": "https://raw.githubusercontent.com/csprofesor/gsrepo/builds/FullHDFilm.cs3?v=bd6e5c2761b9d4f8bb5b1bd13d7726ce9537272083394e104a67888c405dc60c",
     "status": 1,
     "version": 37,
     "name": "FullHDFilm",
@@ -295,7 +295,7 @@
       "csprofesor"
     ],
     "description": "Fullhdfilm ile en yeni vizyon filmler Full HD ve kesintisiz film sizlerle. Özgün film arşivimizle en üstün kaliteli film izle keyfini sunuyoruz.",
-    "fileSize": 34398,
+    "fileSize": 35386,
     "repositoryUrl": "https://github.com/csprofesor/gsrepo",
     "language": "tr",
     "tvTypes": [
@@ -304,7 +304,7 @@
     ],
     "iconUrl": "https://www.google.com/s2/favicons?domain=hdfilmizle.live&sz=%size%",
     "apiVersion": 1,
-    "fileHash": "sha256-f96a5da7e613f706ecb57a43347315615e612343a2fa08dc2d31f81e6114f78c"
+    "fileHash": "sha256-bd6e5c2761b9d4f8bb5b1bd13d7726ce9537272083394e104a67888c405dc60c"
   },
   {
     "url": "https://raw.githubusercontent.com/csprofesor/gsrepo/builds/HDFilmCehennemi.cs3?v=6c61a53d9ee481d7b965a1e17d9afa1b4d368874af4f6a28c1fcafb159d130f3",
