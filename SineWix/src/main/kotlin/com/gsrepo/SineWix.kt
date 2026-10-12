@@ -1,9 +1,6 @@
 package com.gsrepo
 
 import android.util.Base64
-import com.fasterxml.jackson.databind.DeserializationFeature
-import com.fasterxml.jackson.databind.ObjectMapper
-import com.fasterxml.jackson.module.kotlin.KotlinModule
 import com.lagradost.cloudstream3.Actor
 import com.lagradost.cloudstream3.Episode
 import com.lagradost.cloudstream3.HomePageResponse
@@ -25,6 +22,9 @@ import com.lagradost.cloudstream3.newMovieLoadResponse
 import com.lagradost.cloudstream3.newMovieSearchResponse
 import com.lagradost.cloudstream3.newTvSeriesLoadResponse
 import com.lagradost.cloudstream3.newTvSeriesSearchResponse
+import com.lagradost.cloudstream3.utils.AppUtils.parseJson
+import com.lagradost.cloudstream3.utils.AppUtils.tryParseJson
+import com.lagradost.cloudstream3.utils.AppUtils.toJson
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.ExtractorLinkType
 import com.lagradost.cloudstream3.utils.Qualities
@@ -87,10 +87,7 @@ class SineWix : MainAPI() {
 
     private val seenMediaIds = Collections.synchronizedSet(HashSet<Int>())
 
-    private val jsonMapper = ObjectMapper().apply {
-        registerModule(KotlinModule.Builder().build())
-        configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
-    }
+
 
     override val mainPage = mainPageOf(
         "/api/genres/topteen/all/$apiKey" to "Top 10 Listesi",
@@ -211,11 +208,11 @@ class SineWix : MainAPI() {
         val rawText = response.text
 
         if (encHeader == "AES-256-GCM") {
-            val jsonNode = jsonMapper.readTree(rawText)
-            val iv = jsonNode.get("iv")?.asText() ?: return rawText
-            val tag = jsonNode.get("tag")?.asText() ?: return rawText
-            val aad = jsonNode.get("aad")?.asText() ?: return rawText
-            val ciphertext = jsonNode.get("ciphertext")?.asText() ?: return rawText
+            val jsonNode = tryParseJson<Map<String, String>>(rawText)
+            val iv = jsonNode?.get("iv") ?: return rawText
+            val tag = jsonNode.get("tag") ?: return rawText
+            val aad = jsonNode.get("aad") ?: return rawText
+            val ciphertext = jsonNode.get("ciphertext") ?: return rawText
             return try {
                 decryptGcmResponse(ciphertext, iv, tag, aad, respSessionId, nonce, timestamp)
             } catch (e: Exception) {
@@ -246,7 +243,7 @@ class SineWix : MainAPI() {
                 "platform" to "android"
             )
             val resText = apiCall("/api/tokens/mobile/generate", "POST", form) ?: return null
-            val tokenObj = jsonMapper.readValue(resText, SineTokenResponse::class.java)
+            val tokenObj = tryParseJson<SineTokenResponse>(resText) ?: return null
             val accessToken = tokenObj.accessToken ?: return null
             val sessionId = tokenObj.sessionId ?: ""
             val expiresIn = tokenObj.expiresIn ?: 86400
@@ -283,7 +280,7 @@ class SineWix : MainAPI() {
             }
 
             val result = if (!resText.isNullOrBlank()) {
-                try { jsonMapper.readValue(resText, SineSonuc::class.java) } catch (_: Throwable) { null }
+                tryParseJson<SineSonuc>(resText)
             } else null
 
             val rawItems = result?.data ?: emptyList()
@@ -357,11 +354,7 @@ class SineWix : MainAPI() {
             null
         } ?: return emptyList()
 
-        val result = try {
-            jsonMapper.readValue(resText, SineSearch::class.java)
-        } catch (_: Throwable) {
-            null
-        }
+        val result = tryParseJson<SineSearch>(resText)
 
         val items = result?.results ?: result?.search ?: emptyList()
         return items.mapNotNull { it.toSearchResponse(filterDuplicates = false) }
@@ -387,11 +380,7 @@ class SineWix : MainAPI() {
             null
         } ?: return null
 
-        val result = try {
-            jsonMapper.readValue(resText, SineMovie::class.java)
-        } catch (_: Throwable) {
-            null
-        } ?: return null
+        val result = tryParseJson<SineMovie>(resText) ?: return null
 
         val name = result.title ?: result.name ?: ""
         val title = name
@@ -413,7 +402,7 @@ class SineWix : MainAPI() {
         val trailer = result.trailer
 
         val videosList = result.videos ?: result.servers ?: emptyList()
-        val videoLinksJson = jsonMapper.writeValueAsString(videosList)
+        val videoLinksJson = videosList.toJson()
 
         return newMovieLoadResponse(title, url, TvType.Movie, videoLinksJson) {
             this.posterUrl = poster
@@ -440,11 +429,7 @@ class SineWix : MainAPI() {
             null
         } ?: return null
 
-        val result = try {
-            jsonMapper.readValue(resText, SineSerie::class.java)
-        } catch (_: Throwable) {
-            null
-        } ?: return null
+        val result = tryParseJson<SineSerie>(resText) ?: return null
 
         val name = result.name ?: result.title ?: ""
         val title = name
@@ -465,9 +450,9 @@ class SineWix : MainAPI() {
             seasonItem.episodes?.forEach { ep ->
                 val epNumber = ep.episodeNumber ?: 1
                 val videosList = ep.videos ?: ep.servers ?: emptyList()
-                val videoData = jsonMapper.writeValueAsString(videosList)
+                val videoData = videosList.toJson()
                 episodes.add(newEpisode(videoData) {
-                    this.name = ep.name
+                    this.name = ep.name ?: ""
                     this.season = seasonNumber
                     this.episode = epNumber
                     this.description = ep.overview
@@ -498,11 +483,7 @@ class SineWix : MainAPI() {
         val cleanData = data.trim()
 
         if (cleanData.startsWith("[")) {
-            val videosList = try {
-                jsonMapper.readValue(cleanData, jsonMapper.typeFactory.constructCollectionType(List::class.java, SineVideo::class.java))
-            } catch (_: Throwable) {
-                emptyList<SineVideo>()
-            }
+            val videosList = tryParseJson<List<SineVideo>>(cleanData) ?: emptyList()
 
             for (video in videosList) {
                 val videoUrl = video.link ?: video.url ?: video.embedUrl ?: continue
