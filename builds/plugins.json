@@ -493,16 +493,16 @@
     "fileHash": "sha256-ce02080c5f308df47c8ecec4fa54cc6bbc0c6ebfd8e749b5f58047a45856f662"
   },
   {
-    "url": "https://raw.githubusercontent.com/csprofesor/gsrepo/builds/SineWix.cs3?v=3f58de143dfd36990079ac8393ece3b1e11b7cbaee78d1b55640054c6cdf6763",
+    "url": "https://raw.githubusercontent.com/csprofesor/gsrepo/builds/SineWix.cs3?v=13e247899c755a0b0fa2ecd343d4e982c7f3ec8ba0f7db72bf2e3d1760b077d2",
     "status": 1,
-    "version": 3,
+    "version": 4,
     "name": "SineWix",
     "internalName": "SineWix",
     "authors": [
       "csprofesor"
     ],
     "description": "SineWix | Film - Dizi - Anime İzleme Uygulaması",
-    "fileSize": 30070,
+    "fileSize": 42530,
     "repositoryUrl": "https://github.com/csprofesor/gsrepo",
     "language": "tr",
     "tvTypes": [
@@ -512,7 +512,7 @@
     ],
     "iconUrl": "https://www.google.com/s2/favicons?domain=https://www.sinewix.com/&sz=%size%",
     "apiVersion": 1,
-    "fileHash": "sha256-3f58de143dfd36990079ac8393ece3b1e11b7cbaee78d1b55640054c6cdf6763"
+    "fileHash": "sha256-13e247899c755a0b0fa2ecd343d4e982c7f3ec8ba0f7db72bf2e3d1760b077d2"
   },
   {
     "url": "https://raw.githubusercontent.com/csprofesor/gsrepo/builds/TavsiyeFilmIzle.cs3?v=8a7a3fa1a1dd4dee0c2da56b9ab5c80ddaffe4294063dd18f961d5578a63d10e",
