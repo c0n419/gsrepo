@@ -147,29 +147,50 @@ class HintFilmIzle : MainAPI() {
 
     private fun Element.toResult(card: Element = this): SearchResponse? {
         val href = fix(attr("href")) ?: return null
-        val path = href.removePrefix(mainUrl).substringBefore("?").trimEnd('/')
+        val path = href.removePrefix(mainUrl).substringBefore("?").substringBefore("#").trimEnd('/')
         if (!href.startsWith(mainUrl, true) || (!path.startsWith("/film/") && !path.startsWith("/dizi/"))) return null
+        if (path.contains("-sezon-", ignoreCase = true) || path.contains("-bolum-", ignoreCase = true)) return null
         val title = titleOf(card) ?: path.substringAfterLast('/').replace(Regex("[-_]+"), " ")
         return if (path.startsWith("/dizi/")) newTvSeriesSearchResponse(title, href, TvType.TvSeries) { posterUrl = card.poster(); score = Score.from10(rating(card)) }
         else newMovieSearchResponse(title, href, TvType.Movie) { posterUrl = card.poster(); score = Score.from10(rating(card)) }
     }
 
     private fun cardFor(anchor: Element): Element = anchor.parents().firstOrNull { p -> p.select("img").isNotEmpty() && p.select("a[href*='/film/'],a[href*='/dizi/']").size <= 4 } ?: anchor
-    private fun categorySlug(data: String): String? = data.substringBefore("?").trimEnd('/').substringAfter("/tur/", "").takeIf { it.isNotBlank() }
-    private fun categoryMatches(card: Element, slug: String): Boolean = card.select("a[href*='/tur/']").any { a -> val href = fix(a.attr("href")) ?: return@any false; href.substringBefore("?").trimEnd('/').equals("$mainUrl/tur/$slug", ignoreCase = true) }
-    private fun results(doc: Document, slug: String? = null): List<SearchResponse> = doc.select("a[href*='/film/'],a[href*='/dizi/'], .film-box a, .movie-item a, .item a, .film-item a").mapNotNull { a -> val card = cardFor(a); if (slug != null && !categoryMatches(card, slug)) null else a.toResult(card) }.distinctBy { it.url }
+    private fun results(container: Element): List<SearchResponse> = container.select("a[href*='/film/'],a[href*='/dizi/'], .film-box a, .movie-item a, .item a, .film-item a").mapNotNull { a -> val card = cardFor(a); a.toResult(card) }.distinctBy { it.url }
+
+    private fun recommendations(doc: Document, currentUrl: String): List<SearchResponse> {
+        val cleanCurrentUrl = currentUrl.substringBefore("?").substringBefore("#").trimEnd('/')
+        val heading = doc.select("h1, h2, h3, h4, h5, h6").firstOrNull { h ->
+            val t = h.text()
+            t.contains("Öneriler", ignoreCase = true) ||
+            t.contains("Benzer", ignoreCase = true) ||
+            t.contains("İzleyenlere", ignoreCase = true) ||
+            t.contains("İlgili", ignoreCase = true)
+        }
+        val container: Element? = heading?.parents()?.firstOrNull { p ->
+            p.hasClass("common-lists") ||
+            p.hasClass("new-series") ||
+            p.hasClass("related") ||
+            p.hasClass("similar") ||
+            p.hasClass("related-posts") ||
+            p.select("a[href*='/film/'], a[href*='/dizi/']").size >= 2
+        } ?: doc.selectFirst(".common-lists, .new-series, .related-posts, .similar-movies, .related-series")
+
+        val root = container ?: doc
+        return results(root).filter { item ->
+            val cleanItemUrl = item.url.substringBefore("?").substringBefore("#").trimEnd('/')
+            cleanItemUrl != cleanCurrentUrl
+        }
+    }
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        val base = request.data.substringBefore("?").trimEnd('/'); val q = request.data.substringAfter("?", "").takeIf { it.isNotBlank() }
+        val base = request.data.substringBefore("?").trimEnd('/')
+        val q = request.data.substringAfter("?", "").takeIf { it.isNotBlank() }
         val url = if (page <= 1) request.data else base + "/page/$page/" + if (q != null) "?$q" else ""
-        val slug = categorySlug(request.data)
-        var response = runCatching { app.get(url, referer = "$mainUrl/", headers = headers(), interceptor = interceptor) }.getOrNull() ?: return newHomePageResponse(request.name, emptyList(), hasNext = false)
-        var doc = response.document; var r = results(doc, slug)
-        if (slug != null && r.isEmpty()) {
-            val fallbackUrl = if (page <= 1) "$mainUrl/film?order=DESC&orderby=date" else "$mainUrl/film/page/$page/?order=DESC&orderby=date"
-            response = runCatching { app.get(fallbackUrl, referer = "$mainUrl/", headers = headers(), interceptor = interceptor) }.getOrNull() ?: response
-            doc = response.document; r = results(doc, slug)
-        }
+        val response = runCatching { app.get(url, referer = "$mainUrl/", headers = headers(), interceptor = interceptor) }.getOrNull()
+            ?: return newHomePageResponse(request.name, emptyList(), hasNext = false)
+        val doc = response.document
+        val r = results(doc)
         return newHomePageResponse(request.name, r, hasNext = r.isNotEmpty())
     }
 
@@ -218,7 +239,7 @@ class HintFilmIzle : MainAPI() {
         val imdb = doc.selectFirst(".imdb-score, .puan, [itemprop='ratingValue']")?.text() ?: Regex("IMDB\\s*(?:PUANI|Puanı)?\\s*([0-9]+(?:[.,][0-9]+)?)", RegexOption.IGNORE_CASE).find(text)?.groupValues?.get(1)
         val duration = Regex("SÜRE\\s+(\\d+)\\s*dk", RegexOption.IGNORE_CASE).find(text)?.groupValues?.getOrNull(1)?.toIntOrNull()
         val tag = genres(doc, text); val cast = actors(doc)
-        val rec = results(doc).ifEmpty { listOf(newMovieSearchResponse("Hint Filmleri", "$mainUrl/film", TvType.Movie) {}) }
+        val rec = recommendations(doc, url).ifEmpty { listOf(newMovieSearchResponse("Hint Filmleri", "$mainUrl/film", TvType.Movie) {}) }
         val p = plot(doc, text)
         if (url.contains("/dizi/", true) || doc.selectFirst(".episodes,.episode-list,.seasons") != null) {
             val eps = doc.select("a[href*='/dizi/'],a[href*='sezon'],a[href*='bolum'],.episode a,.episodes a,.episode-list a").mapIndexedNotNull { index, a ->
