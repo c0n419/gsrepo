@@ -14,6 +14,7 @@ import com.lagradost.cloudstream3.TvType
 import com.lagradost.cloudstream3.app
 import com.lagradost.cloudstream3.fixUrlNull
 import com.lagradost.cloudstream3.mainPageOf
+import com.lagradost.cloudstream3.network.WebViewResolver
 import com.lagradost.cloudstream3.newEpisode
 import com.lagradost.cloudstream3.newHomePageResponse
 import com.lagradost.cloudstream3.newMovieLoadResponse
@@ -300,7 +301,30 @@ class DiziMag : MainAPI() {
                 }
             } catch (_: Exception) { }
 
-            loadExtractor(iframe, "$mainUrl/", subtitleCallback, callback)
+            val extracted = loadExtractor(iframe, "$mainUrl/", subtitleCallback, callback)
+            if (extracted) {
+                foundLinks = true
+            } else {
+                try {
+                    val resolver = WebViewResolver(Regex(".*(?:\\.m3u8|\\.mp4|\\.txt|/hls/|playlist).*"))
+                    val wvResp = app.get(iframe, headers = mapOf("Referer" to "$mainUrl/"), interceptor = resolver)
+                    val wvUrl = wvResp.url
+                    if (wvUrl.contains(".m3u8") || wvUrl.contains("/hls/") || wvUrl.contains("playlist") || wvUrl.contains(".mp4") || wvUrl.contains(".mkv")) {
+                        callback.invoke(
+                            newExtractorLink(
+                                source = this.name,
+                                name = this.name,
+                                url = wvUrl,
+                                type = if (wvUrl.contains(".m3u8") || wvUrl.contains("/hls/")) ExtractorLinkType.M3U8 else ExtractorLinkType.VIDEO
+                            ) {
+                                this.referer = iframe
+                                this.quality = Qualities.Unknown.value
+                            }
+                        )
+                        foundLinks = true
+                    }
+                } catch (_: Exception) { }
+            }
         }
 
         return foundLinks || iframes.isNotEmpty()
