@@ -9,6 +9,9 @@ import com.lagradost.cloudstream3.LoadResponse.Companion.addTrailer
 import com.lagradost.cloudstream3.LoadResponse.Companion.addImdbId
 import com.lagradost.cloudstream3.mvvm.safeApiCall
 import com.lagradost.cloudstream3.utils.*
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
@@ -410,11 +413,29 @@ class Anizm : MainAPI() {
                     } else {
                         "${this.name} ($translator)"
                     }
-                    M3u8Helper.generateM3u8(
-                        displayName,
-                        videoSource,
-                        referer
-                    ).forEach(sourceCallback)
+
+                    try {
+                        M3u8Helper.generateM3u8(
+                            displayName,
+                            videoSource,
+                            referer,
+                            headers = mapOf("Referer" to referer, "User-Agent" to browserUserAgent)
+                        ).forEach(sourceCallback)
+                    } catch (e: Throwable) {
+                        Log.w(logTag, "invokeLokalSource: M3u8Helper failed: ${e.message}")
+                    }
+
+                    sourceCallback(
+                        newExtractorLink(
+                            source = this.name,
+                            name = displayName,
+                            url = videoSource,
+                            type = INFER_TYPE
+                        ) {
+                            this.referer = "https://anizmplayer.com/"
+                            this.quality = Qualities.P1080.value
+                        }
+                    )
                     return
                 }
             }
@@ -449,24 +470,27 @@ class Anizm : MainAPI() {
                 }
 
                 if (mediaUrl.contains(".m3u8")) {
-                    M3u8Helper.generateM3u8(
-                        displayName,
-                        mediaUrl,
-                        normalizedUrl
-                    ).forEach(sourceCallback)
-                } else {
-                    sourceCallback(
-                        newExtractorLink(
-                            source = this.name,
-                            name = displayName,
-                            url = mediaUrl,
-                            type = INFER_TYPE
-                        ) {
-                            this.referer = normalizedUrl
-                            this.quality = Qualities.P1080.value
-                        }
-                    )
+                    try {
+                        M3u8Helper.generateM3u8(
+                            displayName,
+                            mediaUrl,
+                            normalizedUrl
+                        ).forEach(sourceCallback)
+                    } catch (e: Throwable) {
+                        Log.w(logTag, "invokeLokalSource: M3u8Helper failed for direct media: ${e.message}")
+                    }
                 }
+                sourceCallback(
+                    newExtractorLink(
+                        source = this.name,
+                        name = displayName,
+                        url = mediaUrl,
+                        type = INFER_TYPE
+                    ) {
+                        this.referer = normalizedUrl
+                        this.quality = Qualities.P1080.value
+                    }
+                )
             }
         }
     }
@@ -511,37 +535,41 @@ class Anizm : MainAPI() {
                     val videos = sourcesResp?.videos
                     if (!videos.isNullOrEmpty()) {
                         Log.d(logTag, "loadLinks: translator $translatorName has ${videos.size} videos")
-                        for (v in videos) {
-                            val vid = v.id ?: continue
-                            val videoName = v.name ?: "Video"
-                            safeApiCall {
-                                val videoInfoUrl = "$mainUrl/video/$vid"
-                                val videoInfoResp = app.get(
-                                    videoInfoUrl,
-                                    referer = normalizedData,
-                                    headers = browserHeaders + mapOf(
-                                        "X-Requested-With" to "XMLHttpRequest",
-                                        "Referer" to normalizedData
-                                    )
-                                ).parsedSafe<V3VideoInfoResponse>()
+                        coroutineScope {
+                            videos.map { v ->
+                                async {
+                                    val vid = v.id ?: return@async
+                                    val videoName = v.name ?: "Video"
+                                    safeApiCall {
+                                        val videoInfoUrl = "$mainUrl/video/$vid"
+                                        val videoInfoResp = app.get(
+                                            videoInfoUrl,
+                                            referer = normalizedData,
+                                            headers = browserHeaders + mapOf(
+                                                "X-Requested-With" to "XMLHttpRequest",
+                                                "Referer" to normalizedData
+                                            )
+                                        ).parsedSafe<V3VideoInfoResponse>()
 
-                                val playerHtml = videoInfoResp?.player
-                                val videoUrl = videoInfoResp?.url
+                                        val playerHtml = videoInfoResp?.player
+                                        val videoUrl = videoInfoResp?.url
 
-                                val playerIframeUrl = if (!playerHtml.isNullOrBlank()) {
-                                    Jsoup.parse(playerHtml).selectFirst("iframe")?.attr("src")
-                                } else videoUrl
+                                        val playerIframeUrl = if (!playerHtml.isNullOrBlank()) {
+                                            Jsoup.parse(playerHtml).selectFirst("iframe")?.attr("src")
+                                        } else videoUrl
 
-                                if (!playerIframeUrl.isNullOrBlank()) {
-                                    val fixedIframe = normalizeUrl(fixUrl(playerIframeUrl))
-                                    Log.d(logTag, "loadLinks: resolved iframe = $fixedIframe ($videoName)")
-                                    if (fixedIframe.contains("anizmplayer.com") || fixedIframe.contains("/player/")) {
-                                        invokeLokalSource(fixedIframe, translatorName, videoName, subtitleCallback, callback)
-                                    } else {
-                                        loadExtractor(fixedIframe, normalizedData, subtitleCallback, callback)
+                                        if (!playerIframeUrl.isNullOrBlank()) {
+                                            val fixedIframe = normalizeUrl(fixUrl(playerIframeUrl))
+                                            Log.d(logTag, "loadLinks: resolved iframe = $fixedIframe ($videoName)")
+                                            if (fixedIframe.contains("anizmplayer.com") || fixedIframe.contains("/player/")) {
+                                                invokeLokalSource(fixedIframe, translatorName, videoName, subtitleCallback, callback)
+                                            } else {
+                                                loadExtractor(fixedIframe, normalizedData, subtitleCallback, callback)
+                                            }
+                                        }
                                     }
                                 }
-                            }
+                            }.awaitAll()
                         }
                     }
                 }
@@ -588,42 +616,46 @@ class Anizm : MainAPI() {
                 }
 
                 val videoLinks = Jsoup.parse(translatorHtml).select("a[video]")
-                videoLinks.forEach { video ->
-                    val videoUrlRaw = video.attr("video").let(::fixUrl)
-                    if (videoUrlRaw.isBlank()) return@forEach
-                    val videoUrl = normalizeUrl(videoUrlRaw)
-                    val videoSourceName = video.attr("data-video-name").ifBlank { video.text().trim() }
+                coroutineScope {
+                    videoLinks.map { video ->
+                        async {
+                            val videoUrlRaw = video.attr("video").let(::fixUrl)
+                            if (videoUrlRaw.isBlank()) return@async
+                            val videoUrl = normalizeUrl(videoUrlRaw)
+                            val videoSourceName = video.attr("data-video-name").ifBlank { video.text().trim() }
 
-                    safeApiCall {
-                        val player = app.get(
-                            videoUrl,
-                            referer = normalizedData,
-                            headers = browserHeaders + mapOf(
-                                "X-Requested-With" to "XMLHttpRequest",
-                                "Referer" to normalizedData
-                            )
-                        ).parsedSafe<Videos>()?.player
+                            safeApiCall {
+                                val player = app.get(
+                                    videoUrl,
+                                    referer = normalizedData,
+                                    headers = browserHeaders + mapOf(
+                                        "X-Requested-With" to "XMLHttpRequest",
+                                        "Referer" to normalizedData
+                                    )
+                                ).parsedSafe<Videos>()?.player
 
-                        if (player.isNullOrBlank()) return@safeApiCall
+                                if (player.isNullOrBlank()) return@safeApiCall
 
-                        val parsed = Jsoup.parse(player)
-                        val iframeElement = parsed.selectFirst("iframe, embed")
-                        val link = (
-                            iframeElement?.attr("src")
-                                ?: iframeElement?.attr("data-src")
-                                ?: iframeElement?.attr("data-lazy-src")
-                        )?.trim()?.takeIf { it.isNotBlank() }
-                            ?: player.trim().takeIf { it.startsWith("http") }
+                                val parsed = Jsoup.parse(player)
+                                val iframeElement = parsed.selectFirst("iframe, embed")
+                                val link = (
+                                    iframeElement?.attr("src")
+                                        ?: iframeElement?.attr("data-src")
+                                        ?: iframeElement?.attr("data-lazy-src")
+                                )?.trim()?.takeIf { it.isNotBlank() }
+                                    ?: player.trim().takeIf { it.startsWith("http") }
 
-                        if (link.isNullOrBlank()) return@safeApiCall
+                                if (link.isNullOrBlank()) return@safeApiCall
 
-                        val fixedLink = normalizeUrl(fixUrl(link))
-                        if (fixedLink.contains("anizmplayer.com") || fixedLink.contains("/player/")) {
-                            invokeLokalSource(fixedLink, translator, videoSourceName, subtitleCallback, callback)
-                        } else {
-                            loadExtractor(fixedLink, normalizedData, subtitleCallback, callback)
+                                val fixedLink = normalizeUrl(fixUrl(link))
+                                if (fixedLink.contains("anizmplayer.com") || fixedLink.contains("/player/")) {
+                                    invokeLokalSource(fixedLink, translator, videoSourceName, subtitleCallback, callback)
+                                } else {
+                                    loadExtractor(fixedLink, normalizedData, subtitleCallback, callback)
+                                }
+                            }
                         }
-                    }
+                    }.awaitAll()
                 }
             }
         }
