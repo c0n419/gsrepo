@@ -295,13 +295,14 @@ class Anizm : MainAPI() {
         val title = cleanTitle(rawTitle) ?: "Anime"
 
         val episodeElements = document.select(
-            "div.v3-episode-list a, div.episodeListTabContent div > a, .info_episodeList a, a[href*='-bolum-izle'], a[href*='-bolum']"
+            "div.v3-episode-list a, div.episodeListTabContent div > a, .info_episodeList a, a[href*='-bolum-izle'], a[href*='-bolum'], a[href*='-izle']"
         )
 
         val episodes = episodeElements.mapNotNull { element ->
             val href = element.attr("href").takeIf { it.isNotBlank() } ?: return@mapNotNull null
             val fullUrl = normalizeUrl(fixUrl(href))
-            if (!fullUrl.contains("-bolum")) return@mapNotNull null
+            if (isHomepageUrl(fullUrl)) return@mapNotNull null
+            if (!fullUrl.contains("-bolum") && !fullUrl.contains("-izle")) return@mapNotNull null
 
             val episodeName = element.selectFirst("span.v3-episode-list-title, div.episodeBlock")?.text()?.trim()
                 ?: element.text().trim().takeIf { it.isNotBlank() }
@@ -310,11 +311,19 @@ class Anizm : MainAPI() {
             newEpisode(fullUrl) {
                 name = episodeName
             }
-        }.distinctBy { it.data }
+        }.distinctBy { it.data }.toMutableList()
+
+        if (episodes.isEmpty() && (normalizedUrl.contains("-izle") || normalizedUrl.contains("-bolum"))) {
+            episodes.add(
+                newEpisode(normalizedUrl) {
+                    name = title
+                }
+            )
+        }
 
         Log.d(logTag, "load: title = $title, episodesCount = ${episodes.size}")
 
-        val type = if (episodes.size == 1) TvType.Movie else TvType.Anime
+        val type = if (episodes.size <= 1) TvType.Movie else TvType.Anime
         val trailer = document.selectFirst(
             "div.yt-hd-thumbnail-inner-container iframe, iframe[src*='youtube.com'], iframe[src*='youtu.be']"
         )?.attr("src")
