@@ -10,7 +10,9 @@ import com.lagradost.cloudstream3.LoadResponse.Companion.addImdbId
 import com.lagradost.cloudstream3.mvvm.safeApiCall
 import com.lagradost.cloudstream3.utils.*
 import org.jsoup.Jsoup
+import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
+import java.util.Collections
 
 class Anizm : MainAPI() {
     override var mainUrl = "https://anizm.com.tr"
@@ -34,17 +36,22 @@ class Anizm : MainAPI() {
         )
     }
 
+    private val seenAnimeUrls: MutableSet<String> = Collections.synchronizedSet(HashSet())
+
     override val mainPage = mainPageOf(
         mainUrl to "Son Eklenen Animeler",
-        "$mainUrl/kategoriler/1" to "Macera",
-        "$mainUrl/kategoriler/2" to "Aksiyon",
-        "$mainUrl/kategoriler/3" to "Komedi",
-        "$mainUrl/kategoriler/4" to "Dram",
-        "$mainUrl/kategoriler/5" to "Romantizm",
-        "$mainUrl/kategoriler/8" to "Bilim-Kurgu",
-        "$mainUrl/kategoriler/13" to "Fantastik",
-        "$mainUrl/kategoriler/26" to "Okul",
-        "$mainUrl/kategoriler/34" to "Shounen",
+        "$mainUrl/arama?kategoriler%5B0%5D=1" to "Macera",
+        "$mainUrl/arama?kategoriler%5B0%5D=2" to "Aksiyon",
+        "$mainUrl/arama?kategoriler%5B0%5D=3" to "Komedi",
+        "$mainUrl/arama?kategoriler%5B0%5D=4" to "Dram",
+        "$mainUrl/arama?kategoriler%5B0%5D=5" to "Romantizm",
+        "$mainUrl/arama?kategoriler%5B0%5D=6" to "Ecchi",
+        "$mainUrl/arama?kategoriler%5B0%5D=8" to "Bilim-Kurgu",
+        "$mainUrl/arama?kategoriler%5B0%5D=11" to "Doğaüstü-Güçler",
+        "$mainUrl/arama?kategoriler%5B0%5D=13" to "Fantastik",
+        "$mainUrl/arama?kategoriler%5B0%5D=26" to "Okul",
+        "$mainUrl/arama?kategoriler%5B0%5D=31" to "Seinen",
+        "$mainUrl/arama?kategoriler%5B0%5D=34" to "Shounen",
     )
 
     private fun normalizeUrl(url: String): String {
@@ -65,108 +72,141 @@ class Anizm : MainAPI() {
         return normalized.equals(root, ignoreCase = true)
     }
 
-    override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        val targetUrl = normalizeUrl(if (page <= 1) request.data else "${request.data}?page=$page")
-        Log.d(logTag, "getMainPage: targetUrl = $targetUrl")
-        val document = app.get(targetUrl, headers = browserHeaders).document
-        val home = document.select("a[href]")
-            .filter { link ->
-                val rawHref = link.attr("href").trim()
-                if (rawHref.isBlank()) return@filter false
-
-                // The site has several SEO/footer links which all point to the
-                // homepage (sometimes with a trailing slash or legacy domain).
-                // They must never become fake "Anizm" cards in CloudStream.
-                val href = normalizeUrl(fixUrl(rawHref)).trimEnd('/')
-
-                !isHomepageUrl(href) &&
-                    !href.contains("/kategoriler/") &&
-                    !href.contains("/temalar/") &&
-                    !href.contains("/anime-izle") &&
-                    !href.contains("/fullViewSearch") &&
-                    !href.contains("/takvim") &&
-                    !href.contains("/giris") &&
-                    !href.contains("/kayit") &&
-                    !href.contains("/favori") &&
-                    !href.contains("/liste") &&
-                    !href.contains("/uyeol") &&
-                    !href.contains("/sasirt-beni") &&
-                    !href.contains("/tavsiyeRobotu")
-            }
-            .mapNotNull { it.toSearchResult() }
-            // Footer SEO links can still be exposed by the site with a legacy
-            // hostname. Remove them after parsing as a second, authoritative guard.
-            .filter { !isHomepageUrl(it.url) }
-            .filterNot { it.name.equals("Logo", ignoreCase = true) }
-            .filterNot { it.name.trim().startsWith("Anizm", ignoreCase = true) }
-            .distinctBy { it.url }
-        val hasNext = document.selectFirst(
-            "div.nextBeforeButtons > div.ui > a.right:not(.disabled), " +
-                "div.nextBeforeButtons a.right:not(.disabled), " +
-                "a[rel=next]:not(.disabled)"
-        ) != null
-
-        Log.d(logTag, "getMainPage: ${request.name} loaded ${home.size} items")
-        return newHomePageResponse(request.name, home, hasNext = hasNext)
-    }
-
     private fun getProperAnimeLink(uri: String): String {
         val normalized = normalizeUrl(uri)
         return if (normalized.contains("-bolum")) {
             val basePart = normalized.substringAfter("$mainUrl/").replace(Regex("-[0-9]+-bolum.*"), "")
             "$mainUrl/$basePart"
-        } else normalized
+        } else normalized.trimEnd('/')
     }
 
-    private fun Element.toSearchResult(): AnimeSearchResponse? {
-        val link = if (tagName() == "a") this else selectFirst("a") ?: return null
-        val href = getProperAnimeLink(fixUrl(link.attr("href")))
-        if (href.isBlank() || isHomepageUrl(href)) return null
+    private fun isGrayCover(posterUrl: String?): Boolean {
+        if (posterUrl.isNullOrBlank()) return true
+        val p = posterUrl.lowercase()
+        return p.contains("defaultcover") || p.contains("no-cover") || p.contains("placeholder")
+    }
 
-        var card: Element = this
-        if (tagName() == "a") {
-            var parent = parent()
-            repeat(5) {
-                if (parent == null) return@repeat
-                if (parent.selectFirst("img") != null) {
-                    card = parent
-                    return@repeat
-                }
-                parent = parent.parent()
-            }
-        }
-
-        val title = card.selectFirst("div.title, h5.animeTitle a, .title, h5, h4, h3")?.text()?.trim()
-            ?: card.selectFirst("img")?.attr("alt")?.trim()?.takeIf { it.isNotBlank() }
-            ?: link.attr("title").trim().takeIf { it.isNotBlank() }
-            ?: link.text().trim().takeIf { it.isNotBlank() }
-            ?: return null
-
-        val posterElement = card.selectFirst("img") ?: return null
-
-        val posterUrl = fixUrlNull(
-            posterElement.let { image ->
-                image.attr("data-src").ifBlank {
-                    image.attr("data-original").ifBlank {
-                        image.attr("data-lazy-src").ifBlank { image.attr("src") }
+    private fun extractPosterUrl(element: Element): String? {
+        val img = element.selectFirst("img") ?: element.selectFirst("noscript img")
+        val raw = img?.let {
+            it.attr("data-v3-deferred-src").ifBlank {
+                it.attr("data-src").ifBlank {
+                    it.attr("data-original").ifBlank {
+                        it.attr("data-lazy-src").ifBlank {
+                            it.attr("src")
+                        }
                     }
                 }
             }
+        } ?: element.selectFirst("noscript img")?.attr("src")
+        val fixed = fixUrlNull(raw)
+        return if (isGrayCover(fixed)) null else fixed
+    }
+
+    private fun cleanTitle(rawTitle: String?): String? {
+        if (rawTitle.isNullOrBlank()) return null
+        val cleaned = rawTitle.trim()
+            .replace(Regex("""\s+posteri$""", RegexOption.IGNORE_CASE), "")
+            .replace(Regex("""\s+izle$""", RegexOption.IGNORE_CASE), "")
+            .trim()
+        if (cleaned.equals("Logo", ignoreCase = true) || cleaned.startsWith("Anizm", ignoreCase = true)) return null
+        return cleaned.ifBlank { null }
+    }
+
+    override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
+        val requestUrl = request.data
+        if (page <= 1 && (isHomepageUrl(requestUrl) || requestUrl == mainPage.first().data)) {
+            seenAnimeUrls.clear()
+        }
+
+        val targetUrl = normalizeUrl(
+            if (page <= 1) {
+                requestUrl
+            } else if (requestUrl.contains("?")) {
+                "$requestUrl&sayfa=$page"
+            } else {
+                "$requestUrl?sayfa=$page"
+            }
         )
 
-        val episodeText = selectFirst("div.truncateText, div.episodeBlock")?.text() ?: link.text()
-        val episode = Regex("""([0-9]+).?s?Bölüm""", RegexOption.IGNORE_CASE)
-            .find(episodeText)?.groupValues?.getOrNull(1)?.toIntOrNull()
+        Log.d(logTag, "getMainPage: targetUrl = $targetUrl")
+        val document = app.get(targetUrl, headers = browserHeaders).document
+        val isHome = isHomepageUrl(targetUrl)
 
-        if (title.equals("Logo", ignoreCase = true) ||
-            title.trim().startsWith("Anizm", ignoreCase = true) ||
-            isHomepageUrl(href)
-        ) return null
+        val items = mutableListOf<AnimeSearchResponse>()
 
-        return newAnimeSearchResponse(title, href, TvType.Anime) {
-            this.posterUrl = posterUrl
-            addSub(episode)
+        if (isHome) {
+            val railElements = document.select(
+                "#v3-latest-rail a, #v3-popular-rail a, #v3-added-rail a, .v3-poster-rail a"
+            )
+            for (element in railElements) {
+                val hrefRaw = element.attr("href").trim()
+                if (hrefRaw.isBlank()) continue
+                val animeUrl = getProperAnimeLink(fixUrl(hrefRaw))
+                if (isHomepageUrl(animeUrl)) continue
+
+                if (seenAnimeUrls.contains(animeUrl)) continue
+
+                val posterUrl = extractPosterUrl(element) ?: continue
+                val titleRaw = element.selectFirst("h3")?.text()
+                    ?: element.selectFirst("img")?.attr("alt")
+                    ?: element.attr("title")
+                val title = cleanTitle(titleRaw) ?: continue
+
+                seenAnimeUrls.add(animeUrl)
+                val episodeText = element.selectFirst("span.v3-card-tag, .v3-card-copy span")?.text()
+                val episode = Regex("""([0-9]+)""").find(episodeText.orEmpty())?.groupValues?.getOrNull(1)?.toIntOrNull()
+
+                items.add(newAnimeSearchResponse(title, animeUrl, TvType.Anime) {
+                    this.posterUrl = posterUrl
+                    addSub(episode)
+                })
+            }
+        } else {
+            fun parseCatalogCards(doc: Document) {
+                val articles = doc.select("article.v3-catalog-card, div.searchResultItem, div.posterBlock")
+                for (article in articles) {
+                    val link = article.selectFirst("h2 a, a.v3-catalog-poster, a[href]") ?: continue
+                    val hrefRaw = link.attr("href").trim()
+                    if (hrefRaw.isBlank()) continue
+                    val animeUrl = getProperAnimeLink(fixUrl(hrefRaw))
+                    if (isHomepageUrl(animeUrl)) continue
+
+                    if (seenAnimeUrls.contains(animeUrl)) continue
+
+                    val posterUrl = extractPosterUrl(article) ?: continue
+                    val titleRaw = article.selectFirst("h2")?.text()
+                        ?: article.selectFirst("img")?.attr("alt")
+                        ?: link.text()
+                    val title = cleanTitle(titleRaw) ?: continue
+
+                    seenAnimeUrls.add(animeUrl)
+
+                    items.add(newAnimeSearchResponse(title, animeUrl, TvType.Anime) {
+                        this.posterUrl = posterUrl
+                    })
+                }
+            }
+
+            parseCatalogCards(document)
+
+            if (items.size < 12 && page == 1) {
+                val page2Url = if (targetUrl.contains("?")) "$targetUrl&sayfa=2" else "$targetUrl?sayfa=2"
+                try {
+                    val doc2 = app.get(page2Url, headers = browserHeaders).document
+                    parseCatalogCards(doc2)
+                } catch (e: Throwable) {
+                    Log.w(logTag, "getMainPage: failed to fetch page 2 for category $targetUrl: ${e.message}")
+                }
+            }
         }
+
+        val hasNext = document.selectFirst(
+            "nav.v3-pagination a[href*='sayfa='], div.nextBeforeButtons a.right:not(.disabled), a[rel=next]:not(.disabled)"
+        ) != null
+
+        Log.d(logTag, "getMainPage: ${request.name} loaded ${items.size} items")
+        return newHomePageResponse(request.name, items, hasNext = hasNext)
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
@@ -184,10 +224,11 @@ class Anizm : MainAPI() {
             val searchItems = response?.data
             if (!searchItems.isNullOrEmpty()) {
                 val results = searchItems.mapNotNull { item: SearchAnimeItem ->
-                    val title = item.title?.trim() ?: return@mapNotNull null
+                    val title = cleanTitle(item.title) ?: return@mapNotNull null
                     val slug = item.slug?.trim() ?: return@mapNotNull null
                     val href = fixUrl("$mainUrl/$slug")
                     val posterUrl = item.poster?.let { fixUrl("$mainUrl/storage/pcovers/$it") }
+                        ?.takeIf { !isGrayCover(it) }
 
                     newAnimeSearchResponse(title, href, TvType.Anime) {
                         this.posterUrl = posterUrl
@@ -203,20 +244,31 @@ class Anizm : MainAPI() {
         }
 
         val document = app.get(
-            "$mainUrl/fullViewSearch?search=$query&skip=0",
+            "$mainUrl/arama?arama=$query",
             headers = browserHeaders + mapOf(
-                "X-Requested-With" to "XMLHttpRequest",
                 "Referer" to "$mainUrl/"
             )
         ).document
-        val fallbackResults = document.select("div.searchResultItem, div.posterBlock")
-            .mapNotNull { it.toSearchResult() }
+        val fallbackResults = document.select("article.v3-catalog-card, div.searchResultItem, div.posterBlock")
+            .mapNotNull { article ->
+                val link = article.selectFirst("h2 a, a.v3-catalog-poster, a[href]") ?: return@mapNotNull null
+                val href = getProperAnimeLink(fixUrl(link.attr("href")))
+                if (href.isBlank() || isHomepageUrl(href)) return@mapNotNull null
+
+                val posterUrl = extractPosterUrl(article) ?: return@mapNotNull null
+                val titleRaw = article.selectFirst("h2")?.text() ?: article.selectFirst("img")?.attr("alt") ?: link.text()
+                val title = cleanTitle(titleRaw) ?: return@mapNotNull null
+
+                newAnimeSearchResponse(title, href, TvType.Anime) {
+                    this.posterUrl = posterUrl
+                }
+            }
             .distinctBy { it.url }
         Log.d(logTag, "search: Fallback HTML returned ${fallbackResults.size} results")
         return fallbackResults
     }
 
-    private fun extractImdbId(document: org.jsoup.nodes.Document): String? {
+    private fun extractImdbId(document: Document): String? {
         val candidates = sequenceOf(
             document.selectFirst("a[href*='imdb.com/title/']")?.attr("href"),
             document.selectFirst("[data-imdb-id]")?.attr("data-imdb-id"),
@@ -234,24 +286,28 @@ class Anizm : MainAPI() {
         Log.d(logTag, "load: inputUrl = $url, normalizedUrl = $normalizedUrl")
         val document = app.get(normalizedUrl, headers = browserHeaders).document
 
-        val title = document.selectFirst("h2.anizm_pageTitle a, h2.anizm_pageTitle, h1.anizm_pageTitle, h1")?.text()?.trim()
+        val rawTitle = document.selectFirst("h1, h2.anizm_pageTitle a, h2.anizm_pageTitle")?.text()?.trim()
             ?.takeIf { it.isNotBlank() }
             ?: document.selectFirst("meta[property='og:title']")?.attr("content")?.trim()
             ?.takeIf { it.isNotBlank() }
-            ?: return newAnimeLoadResponse("Anime", normalizedUrl, TvType.Anime)
+            ?: "Anime"
+
+        val title = cleanTitle(rawTitle) ?: "Anime"
 
         val episodeElements = document.select(
-            "div.episodeListTabContent div > a, div.ui.grid div.four.wide a, .info_episodeList a, a[href*='-bolum-izle']"
+            "div.v3-episode-list a, div.episodeListTabContent div > a, .info_episodeList a, a[href*='-bolum-izle'], a[href*='-bolum']"
         )
 
         val episodes = episodeElements.mapNotNull { element ->
-            val link = if (element.tagName() == "a") element else element.selectFirst("a")
-            val href = link?.attr("href")?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
-            val episodeName = element.selectFirst("div.episodeBlock")?.text()?.trim()
+            val href = element.attr("href").takeIf { it.isNotBlank() } ?: return@mapNotNull null
+            val fullUrl = normalizeUrl(fixUrl(href))
+            if (!fullUrl.contains("-bolum")) return@mapNotNull null
+
+            val episodeName = element.selectFirst("span.v3-episode-list-title, div.episodeBlock")?.text()?.trim()
                 ?: element.text().trim().takeIf { it.isNotBlank() }
                 ?: "Bölüm"
 
-            newEpisode(normalizeUrl(fixUrl(href))) {
+            newEpisode(fullUrl) {
                 name = episodeName
             }
         }.distinctBy { it.data }
@@ -264,23 +320,23 @@ class Anizm : MainAPI() {
         )?.attr("src")
 
         val year = Regex("""\b(19|20)\d{2}\b""").find(
-            document.select("div.infoSta li, div.anizm_boxContent li.dataRow")
+            document.select(".v3-series-overview, div.infoSta li, div.anizm_boxContent li.dataRow")
                 .joinToString(" ") { it.text() }
         )?.value?.toIntOrNull()
 
         val imdbId = extractImdbId(document)
+        val mainPoster = fixUrlNull(
+            document.selectFirst("meta[property='og:image']")?.attr("content")
+                ?: document.selectFirst("div.v3-series-cover img, div.infoPosterImg img")?.let { extractPosterUrl(it) }
+        )?.takeIf { !isGrayCover(it) }
 
         return newAnimeLoadResponse(title, normalizedUrl, type) {
-            posterUrl = fixUrlNull(document.selectFirst("div.infoPosterImg > img, div.infoPosterImg img")?.let {
-                it.attr("data-src").ifBlank {
-                    it.attr("data-original").ifBlank { it.attr("src") }
-                }
-            })
+            posterUrl = mainPoster
             this.year = year
             addEpisodes(DubStatus.Subbed, episodes)
-            plot = document.selectFirst("div.infoDesc")?.text()?.trim()
+            plot = document.selectFirst("div.v3-watch-summary p, meta[property='og:description'], div.infoDesc")?.text()?.trim()
             tags = document.select(
-                "span.dataValue > span.tag > span.label, span.dataValue span.ui.label"
+                "div.v3-catalog-preview-tags span, span.dataValue > span.tag > span.label"
             ).map { it.text() }.distinct()
             imdbId?.let { addImdbId(it) }
             trailer?.let { addTrailer(it) }
@@ -420,6 +476,70 @@ class Anizm : MainAPI() {
             headers = browserHeaders + mapOf("Referer" to "$mainUrl/")
         ).document
 
+        val translatorButtons = document.select(
+            ".v3-translator-button[data-sources], button[data-sources]"
+        )
+
+        if (translatorButtons.isNotEmpty()) {
+            Log.d(logTag, "loadLinks: found ${translatorButtons.size} v3 translator buttons")
+            for (btn in translatorButtons) {
+                safeApiCall {
+                    val sourcesUrlRaw = btn.attr("data-sources").takeIf { it.isNotBlank() } ?: return@safeApiCall
+                    val sourcesUrl = fixUrl(sourcesUrlRaw)
+                    val translatorName = btn.text().trim().ifBlank { "TR" }
+
+                    Log.d(logTag, "loadLinks: requesting v3 translator sources = $sourcesUrl ($translatorName)")
+
+                    val sourcesResp = app.get(
+                        sourcesUrl,
+                        referer = normalizedData,
+                        headers = browserHeaders + mapOf(
+                            "X-Requested-With" to "XMLHttpRequest",
+                            "Referer" to normalizedData
+                        )
+                    ).parsedSafe<V3SourcesResponse>()
+
+                    val videos = sourcesResp?.videos
+                    if (!videos.isNullOrEmpty()) {
+                        Log.d(logTag, "loadLinks: translator $translatorName has ${videos.size} videos")
+                        for (v in videos) {
+                            val vid = v.id ?: continue
+                            val videoName = v.name ?: "Video"
+                            safeApiCall {
+                                val videoInfoUrl = "$mainUrl/video/$vid"
+                                val videoInfoResp = app.get(
+                                    videoInfoUrl,
+                                    referer = normalizedData,
+                                    headers = browserHeaders + mapOf(
+                                        "X-Requested-With" to "XMLHttpRequest",
+                                        "Referer" to normalizedData
+                                    )
+                                ).parsedSafe<V3VideoInfoResponse>()
+
+                                val playerHtml = videoInfoResp?.player
+                                val videoUrl = videoInfoResp?.url
+
+                                val playerIframeUrl = if (!playerHtml.isNullOrBlank()) {
+                                    Jsoup.parse(playerHtml).selectFirst("iframe")?.attr("src")
+                                } else videoUrl
+
+                                if (!playerIframeUrl.isNullOrBlank()) {
+                                    val fixedIframe = normalizeUrl(fixUrl(playerIframeUrl))
+                                    Log.d(logTag, "loadLinks: resolved iframe = $fixedIframe ($videoName)")
+                                    if (fixedIframe.contains("anizmplayer.com") || fixedIframe.contains("/player/")) {
+                                        invokeLokalSource(fixedIframe, translatorName, videoName, subtitleCallback, callback)
+                                    } else {
+                                        loadExtractor(fixedIframe, normalizedData, subtitleCallback, callback)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            return true
+        }
+
         val translatorItems = document.select(
             "div.episodeTranslators div#fansec, div.episodeTranslators [translator], a[translator], [data-translatorclick]"
         ).distinctBy {
@@ -428,7 +548,7 @@ class Anizm : MainAPI() {
                 ?: it.attr("href")
         }
 
-        Log.d(logTag, "loadLinks: found ${translatorItems.size} translators")
+        Log.d(logTag, "loadLinks: found ${translatorItems.size} legacy translators")
 
         translatorItems.forEach { item ->
             safeApiCall {
@@ -444,18 +564,12 @@ class Anizm : MainAPI() {
                     return@safeApiCall
                 }
 
-                Log.d(logTag, "loadLinks: translator = $translator, url = $translatorUrl")
-
                 val translatorResponse = app.get(
                     translatorUrl,
                     referer = normalizedData,
                     headers = browserHeaders + mapOf(
-                        "Accept" to "application/json, text/javascript, */*; q=0.01",
                         "X-Requested-With" to "XMLHttpRequest",
-                        "Referer" to normalizedData,
-                        "sec-fetch-dest" to "empty",
-                        "sec-fetch-mode" to "cors",
-                        "sec-fetch-site" to "same-origin"
+                        "Referer" to normalizedData
                     )
                 ).parsedSafe<Translators>()
 
@@ -465,8 +579,6 @@ class Anizm : MainAPI() {
                 }
 
                 val videoLinks = Jsoup.parse(translatorHtml).select("a[video]")
-                Log.d(logTag, "loadLinks: translator $translator has ${videoLinks.size} video buttons")
-
                 videoLinks.forEach { video ->
                     val videoUrlRaw = video.attr("video").let(::fixUrl)
                     if (videoUrlRaw.isBlank()) return@forEach
@@ -474,23 +586,16 @@ class Anizm : MainAPI() {
                     val videoSourceName = video.attr("data-video-name").ifBlank { video.text().trim() }
 
                     safeApiCall {
-                        Log.d(logTag, "loadLinks: requesting video button = $videoUrl ($videoSourceName)")
                         val player = app.get(
                             videoUrl,
                             referer = normalizedData,
                             headers = browserHeaders + mapOf(
-                                "Accept" to "application/json, text/javascript, */*; q=0.01",
                                 "X-Requested-With" to "XMLHttpRequest",
-                                "Referer" to normalizedData,
-                                "sec-fetch-dest" to "empty",
-                                "sec-fetch-mode" to "cors",
-                                "sec-fetch-site" to "same-origin"
+                                "Referer" to normalizedData
                             )
                         ).parsedSafe<Videos>()?.player
 
-                        if (player.isNullOrBlank()) {
-                            return@safeApiCall
-                        }
+                        if (player.isNullOrBlank()) return@safeApiCall
 
                         val parsed = Jsoup.parse(player)
                         val iframeElement = parsed.selectFirst("iframe, embed")
@@ -501,14 +606,10 @@ class Anizm : MainAPI() {
                         )?.trim()?.takeIf { it.isNotBlank() }
                             ?: player.trim().takeIf { it.startsWith("http") }
 
-                        if (link.isNullOrBlank()) {
-                            return@safeApiCall
-                        }
+                        if (link.isNullOrBlank()) return@safeApiCall
 
                         val fixedLink = normalizeUrl(fixUrl(link))
-                        Log.d(logTag, "loadLinks: resolved player link = $fixedLink ($videoSourceName)")
-
-                        if (fixedLink.contains("anizmplayer.com") || fixedLink.contains("anizm.com.tr/player/") || fixedLink.contains("anizm.net/player/") || fixedLink.contains("anizm.tv/player/")) {
+                        if (fixedLink.contains("anizmplayer.com") || fixedLink.contains("/player/")) {
                             invokeLokalSource(fixedLink, translator, videoSourceName, subtitleCallback, callback)
                         } else {
                             loadExtractor(fixedLink, normalizedData, subtitleCallback, callback)
@@ -543,5 +644,23 @@ class Anizm : MainAPI() {
 
     data class Translators(
         @JsonProperty("data") val data: String? = null
+    )
+
+    data class V3SourcesResponse(
+        @JsonProperty("success") val success: Boolean? = null,
+        @JsonProperty("videos") val videos: List<V3VideoItem>? = null
+    )
+
+    data class V3VideoItem(
+        @JsonProperty("id") val id: Int? = null,
+        @JsonProperty("name") val name: String? = null
+    )
+
+    data class V3VideoInfoResponse(
+        @JsonProperty("success") val success: Boolean? = null,
+        @JsonProperty("url") val url: String? = null,
+        @JsonProperty("player") val player: String? = null,
+        @JsonProperty("source") val source: String? = null,
+        @JsonProperty("translator") val translator: String? = null
     )
 }
