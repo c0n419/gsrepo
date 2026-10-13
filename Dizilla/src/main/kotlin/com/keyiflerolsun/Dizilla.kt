@@ -58,6 +58,11 @@ class Dizilla : MainAPI() {
 
     private val privateAESKey = "9bYMCNQiWsXIYFWYAu7EkdsSbmGBTyUI"
 
+    private val baseHeaders = mapOf(
+        "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:137.0) Gecko/20100101 Firefox/137.0",
+        "Referer" to "$mainUrl/"
+    )
+
     private val seenSlugs = Collections.synchronizedSet(mutableSetOf<String>())
 
     private val categoryMap = mapOf(
@@ -131,7 +136,7 @@ class Dizilla : MainAPI() {
 
             if (isCategoryUrl && page == 1) {
                 // Sayfa 1 için doğrudan kategorinin kendi sayfasından çek (GET)
-                val response = app.get(request.data, interceptor = interceptor)
+                val response = app.get(request.data, headers = baseHeaders, interceptor = interceptor)
                 val document = response.document
                 val script = document.selectFirst("script#__NEXT_DATA__")?.data()
 
@@ -173,6 +178,7 @@ class Dizilla : MainAPI() {
                                     homeItems.add(
                                         newTvSeriesSearchResponse(title, fixUrl(rawSlug), TvType.TvSeries) {
                                             this.posterUrl = poster
+                                            this.posterHeaders = baseHeaders
                                         }
                                     )
                                 }
@@ -266,6 +272,7 @@ class Dizilla : MainAPI() {
                                                 homeItems.add(
                                                     newTvSeriesSearchResponse(title, fixUrl(rawSlug), TvType.TvSeries) {
                                                         this.posterUrl = poster
+                                                        this.posterHeaders = baseHeaders
                                                     }
                                                 )
                                             }
@@ -278,7 +285,7 @@ class Dizilla : MainAPI() {
                 }
             } else {
                 // Diğer durumlar (/tum-bolumler veya HTML parsing)
-                val response = app.get("${request.data}?page=$page", interceptor = interceptor)
+                val response = app.get("${request.data}?page=$page", headers = baseHeaders, interceptor = interceptor)
                 val document = response.document
 
                 val script = document.selectFirst("script#__NEXT_DATA__")?.data()
@@ -322,6 +329,7 @@ class Dizilla : MainAPI() {
                                     homeItems.add(
                                         newTvSeriesSearchResponse(title, fixUrl(rawSlug), TvType.TvSeries) {
                                             this.posterUrl = poster
+                                            this.posterHeaders = baseHeaders
                                         }
                                     )
                                 }
@@ -361,6 +369,7 @@ class Dizilla : MainAPI() {
 
         return newTvSeriesSearchResponse(title, href, TvType.TvSeries) {
             this.posterUrl = posterUrl
+            this.posterHeaders = baseHeaders
         }
     }
 
@@ -370,12 +379,13 @@ class Dizilla : MainAPI() {
 
         val title = if (epName.isNotBlank()) "$name - $epName" else name
 
-        val epDoc = fixUrlNull(this.attr("href"))?.let { Jsoup.parse(app.get(it).body.string()) }
+        val epDoc = fixUrlNull(this.attr("href"))?.let { Jsoup.parse(app.get(it, headers = baseHeaders).body.string()) }
         val href = fixUrlNull(epDoc?.selectFirst("div.poster a")?.attr("href")) ?: return null
         val posterUrl = fixPosterUrl(epDoc?.selectFirst("div.poster img")?.attr("src")) ?: return null
 
         return newTvSeriesSearchResponse(title, href, TvType.TvSeries) {
             this.posterUrl = posterUrl
+            this.posterHeaders = baseHeaders
         }
     }
 
@@ -423,6 +433,7 @@ class Dizilla : MainAPI() {
             veriler.add(
                 newTvSeriesSearchResponse(name, link, TvType.TvSeries) {
                     this.posterUrl = posterLink
+                    this.posterHeaders = baseHeaders
                 }
             )
         }
@@ -433,7 +444,7 @@ class Dizilla : MainAPI() {
     override suspend fun quickSearch(query: String): List<SearchResponse> = search(query)
 
     override suspend fun load(url: String): LoadResponse? {
-        val mainReq = app.get(url, interceptor = interceptor)
+        val mainReq = app.get(url, headers = baseHeaders, interceptor = interceptor)
         val document = mainReq.document
 
         var title: String? = null
@@ -568,7 +579,7 @@ class Dizilla : MainAPI() {
         if (episodeses.isEmpty()) {
             for (sezon in document.select("div.flex.items-center.flex-wrap.gap-2.mb-4 a")) {
                 val sezonhref = fixUrl(sezon.attr("href"))
-                val sezonReq = app.get(sezonhref)
+                val sezonReq = app.get(sezonhref, headers = baseHeaders)
                 val split = sezonhref.split("-")
                 val season = split.getOrNull(split.size - 2)?.toIntOrNull()
                 val sezonDoc = sezonReq.document
@@ -590,6 +601,7 @@ class Dizilla : MainAPI() {
 
         return newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodeses) {
             this.posterUrl = poster
+            this.posterHeaders = baseHeaders
             this.year = year
             this.plot = description
             this.tags = tags
@@ -603,7 +615,7 @@ class Dizilla : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        val document = app.get(data, interceptor = interceptor).document
+        val document = app.get(data, headers = baseHeaders, interceptor = interceptor).document
         val script = document.selectFirst("script#__NEXT_DATA__")?.data() ?: return false
 
         val objectMapper = ObjectMapper().registerModule(KotlinModule.Builder().build())
@@ -676,8 +688,6 @@ class Dizilla : MainAPI() {
             val match = regex.find(cleanUrl)
             if (match != null) cleanUrl = "https://${match.groupValues[1]}"
         }
-
-        cleanUrl = cleanUrl.replace(Regex("(?<!:)/{2,}"), "/")
 
         return fixUrlNull(cleanUrl)
     }
