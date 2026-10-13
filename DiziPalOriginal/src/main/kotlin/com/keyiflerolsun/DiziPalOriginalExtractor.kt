@@ -24,8 +24,8 @@ class DizipalOriginalPlayer : ExtractorApi() {
     ) {
         try {
             val reqHeaders = mapOf(
-                "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                "Referer" to (referer ?: "https://dizipal2137.com/")
+                "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                "Referer" to (referer ?: "https://dizipal2138.com/")
             )
             val response = app.get(url, headers = reqHeaders).text
             extractFromHtml(url, referer, response, subtitleCallback, callback)
@@ -110,7 +110,7 @@ class DizipalOriginalPlayer : ExtractorApi() {
                 }
             }
 
-            val domain = Regex("""https?://[^/]+""").find(url)?.value ?: "https://dizipal2137.com"
+            val domain = Regex("""https?://[^/]+""").find(url)?.value ?: "https://dizipal2138.com"
 
             // Stream Extraction - M3U8
             val fileMatches = Regex("""(?:file|src)\s*:\s*["']([^"']+\.m3u8[^"']*)["']""").findAll(html)

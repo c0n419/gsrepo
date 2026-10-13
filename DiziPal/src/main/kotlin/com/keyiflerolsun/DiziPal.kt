@@ -54,6 +54,8 @@ class DiziPal : MainAPI() {
     override var sequentialMainPageDelay       = 150L
     override var sequentialMainPageScrollDelay = 150L
 
+    private val USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+
     // ! CloudFlare v2
     private val cloudflareKiller by lazy { CloudflareKiller() }
     private val interceptor      by lazy { CloudflareInterceptor(cloudflareKiller) }
@@ -62,11 +64,14 @@ class DiziPal : MainAPI() {
         override fun intercept(chain: Interceptor.Chain): Response {
             val request  = chain.request()
             val response = chain.proceed(request)
-            val doc      = Jsoup.parse(response.peekBody(1024 * 1024).string())
+            val bodyStr  = response.peekBody(1024 * 1024).string()
+            val doc      = Jsoup.parse(bodyStr)
             val htmlStr  = doc.html()
             val htmlLow  = htmlStr.lowercase()
 
-            if (htmlStr.contains("Just a moment")
+            if (response.code == 429 || response.code == 403 || response.code == 503
+                || response.header("cf-mitigated") != null
+                || htmlStr.contains("Just a moment")
                 || htmlStr.contains("Attention Required!")
                 || htmlStr.contains("Cloudflare")
                 || htmlStr.contains("erisime_engellenmis")
@@ -74,6 +79,7 @@ class DiziPal : MainAPI() {
                 || htmlStr.contains("Doğrulama")
                 || htmlLow.contains("cf-turnstile")
                 || htmlLow.contains("turnstile")
+                || doc.title().contains("Doğrulama", ignoreCase = true)
             ) {
                 return cloudflareKiller.intercept(chain)
             }
@@ -518,6 +524,8 @@ class DiziPal : MainAPI() {
                     val tokResp = app.get(
                         "$mainUrl/ajax-token",
                         headers = mapOf(
+                            "User-Agent" to USER_AGENT,
+                            "Accept" to "*/*",
                             "X-Requested-With" to "XMLHttpRequest",
                             "Referer" to targetUrl,
                             "Cookie" to cookieHeader
@@ -540,6 +548,8 @@ class DiziPal : MainAPI() {
                     "$mainUrl/ajax-player-config",
                     data = mapOf("cfg" to cfg),
                     headers = mapOf(
+                        "User-Agent" to USER_AGENT,
+                        "Accept" to "*/*",
                         "X-Requested-With" to "XMLHttpRequest",
                         "Content-Type" to "application/x-www-form-urlencoded",
                         "Referer" to targetUrl,
@@ -583,7 +593,7 @@ class DiziPal : MainAPI() {
                             ) {
                                 headers = mapOf(
                                     "Referer" to targetUrl,
-                                    "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+                                    "User-Agent" to USER_AGENT
                                 )
                                 Qualities.Unknown.value
                             }
@@ -598,7 +608,7 @@ class DiziPal : MainAPI() {
                                     timeout = 15000,
                                     headers = mapOf(
                                         "Referer" to targetUrl,
-                                        "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+                                        "User-Agent" to USER_AGENT
                                     )
                                 )
                                 DizipalPlayer().extractFromHtml(
@@ -644,7 +654,7 @@ class DiziPal : MainAPI() {
                                 timeout = 15000,
                                 headers = mapOf(
                                     "Referer" to targetUrl,
-                                    "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+                                    "User-Agent" to USER_AGENT
                                 )
                             )
                             DizipalPlayer().extractFromHtml(
@@ -724,9 +734,17 @@ class DiziPal : MainAPI() {
 
     private fun getHeaders(baseUrl: String): Map<String, String> {
         return mapOf(
-            "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-            "Accept-Language" to "tr-TR,tr;q=0.9,en;q=0.8",
+            "User-Agent" to USER_AGENT,
+            "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+            "Accept-Language" to "tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7",
+            "Sec-Ch-Ua" to "\"Not-A.Brand\";v=\"99\", \"Chromium\";v=\"124\", \"Google Chrome\";v=\"124\"",
+            "Sec-Ch-Ua-Mobile" to "?0",
+            "Sec-Ch-Ua-Platform" to "\"Windows\"",
+            "Sec-Fetch-Dest" to "document",
+            "Sec-Fetch-Mode" to "navigate",
+            "Sec-Fetch-Site" to "same-origin",
+            "Sec-Fetch-User" to "?1",
+            "Upgrade-Insecure-Requests" to "1",
             "Referer" to baseUrl
         )
     }
