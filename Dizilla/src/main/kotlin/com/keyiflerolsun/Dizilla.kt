@@ -102,7 +102,8 @@ class Dizilla : MainAPI() {
     )
 
     override val mainPage = mainPageOf(
-        "${mainUrl}/tum-bolumler" to "Yeni Eklenen Bölümler",
+        // ponytail: /tum-bolumler SSR artık bölüm listesi döndürmüyor; ana sayfa secureData'sı getEpisodesOnBrandAll taşıyor
+        mainUrl to "Yeni Eklenen Bölümler",
         "${mainUrl}/arsiv" to "Yeni Eklenen Diziler",
         "${mainUrl}/dizi-turu/aksiyon" to "Aksiyon",
         "${mainUrl}/dizi-turu/animasyon" to "Animasyon",
@@ -412,14 +413,22 @@ class Dizilla : MainAPI() {
 
                             if (listArray != null && listArray.isArray) {
                                 listArray.forEach { item ->
+                                    val isEpisode = !item.path("episode_used_slug").isMissingNode
                                     val title = item.get("original_title")?.asText()?.takeIf { it.isNotBlank() }
                                         ?: item.get("culture_title")?.asText()?.takeIf { it.isNotBlank() }
                                         ?: item.get("used_title")?.asText()?.takeIf { it.isNotBlank() }
                                         ?: item.get("title")?.asText()?.takeIf { it.isNotBlank() }
                                         ?: return@forEach
 
-                                    val rawSlug = item.get("used_slug")?.asText()
-                                        ?: item.get("slug")?.asText()
+                                    val displayTitle = if (isEpisode) {
+                                        val epNo = item.path("episode_no").asInt().takeIf { it > 0 }
+                                        val sezonNo = item.path("season_no").asInt().takeIf { it > 0 }
+                                        "$title ${sezonNo ?: "?"}x${epNo ?: "?"}"
+                                    } else title
+
+                                    val rawSlug = item.get("used_slug")?.asText()?.takeIf { it.isNotBlank() }
+                                        ?: item.get("episode_used_slug")?.asText()?.takeIf { it.isNotBlank() }
+                                        ?: item.get("slug")?.asText()?.takeIf { it.isNotBlank() }
                                         ?: return@forEach
 
                                     val mediaId = item.get("id")?.asText()?.takeIf { it.isNotBlank() } ?: rawSlug
@@ -439,7 +448,7 @@ class Dizilla : MainAPI() {
                                     if (cleanSlug.isNotEmpty()) seenMediaIds.add(cleanSlug)
 
                                     homeItems.add(
-                                        newTvSeriesSearchResponse(title, fixUrl(rawSlug), TvType.TvSeries) {
+                                        newTvSeriesSearchResponse(displayTitle, fixUrl(rawSlug), TvType.TvSeries) {
                                             this.posterUrl = poster
                                             this.posterHeaders = baseHeaders
                                         }
