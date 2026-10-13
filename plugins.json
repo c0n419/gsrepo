@@ -141,7 +141,7 @@
     "fileHash": "sha256-1ff238cd66b768c8e9f0073de60bde16365e1c451ac6fcda9b21875464f29215"
   },
   {
-    "url": "https://raw.githubusercontent.com/csprofesor/gsrepo/builds/Dizilla.cs3?v=03b43697345c6a3910a75c7d57ad419372d1fae8d9d06e07abf18b024b0eb177",
+    "url": "https://raw.githubusercontent.com/csprofesor/gsrepo/builds/Dizilla.cs3?v=1fbb7c658811cbebcf3e58639db35274b80ab4ae1f99246772a58c4c12c6d549",
     "status": 1,
     "version": 92,
     "name": "Dizilla",
@@ -150,7 +150,7 @@
       "csprofesor"
     ],
     "description": "Dizilla tüm yabancı dizileri ücretsiz olarak Türkçe Dublaj ve altyazılı seçenekleri ile 1080P kalite izleyebileceğiniz yeni nesil yabancı dizi izleme siteniz.",
-    "fileSize": 47804,
+    "fileSize": 48215,
     "repositoryUrl": "https://github.com/csprofesor/gsrepo",
     "language": "tr",
     "tvTypes": [
@@ -158,7 +158,7 @@
     ],
     "iconUrl": "https://www.google.com/s2/favicons?domain=dizilla.club&sz=%size%",
     "apiVersion": 1,
-    "fileHash": "sha256-03b43697345c6a3910a75c7d57ad419372d1fae8d9d06e07abf18b024b0eb177"
+    "fileHash": "sha256-1fbb7c658811cbebcf3e58639db35274b80ab4ae1f99246772a58c4c12c6d549"
   },
   {
     "url": "https://raw.githubusercontent.com/csprofesor/gsrepo/builds/DiziMag.cs3?v=2bfb8d6c03825342b6ecc4426a540cd80a1c779d34cf59cfcbdf1c4ede89a697",
