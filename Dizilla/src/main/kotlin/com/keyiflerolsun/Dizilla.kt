@@ -63,7 +63,7 @@ class Dizilla : MainAPI() {
         "Referer" to "$mainUrl/"
     )
 
-    private val seenSlugs = Collections.synchronizedSet(mutableSetOf<String>())
+    private val seenMediaIds = Collections.synchronizedSet(mutableSetOf<String>())
 
     private val categoryMap = mapOf(
         "suc" to 1,
@@ -122,16 +122,15 @@ class Dizilla : MainAPI() {
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         return try {
-            // Sadece ilk kategorinin 1. sayfasında seenSlugs kümesini temizle
+            // Sadece ilk kategorinin 1. sayfasında seenMediaIds kümesini temizle
             if (page == 1 && request.data == mainPage.first().data) {
-                seenSlugs.clear()
+                seenMediaIds.clear()
             }
 
             val objectMapper = ObjectMapper().registerModule(KotlinModule.Builder().build())
             objectMapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
 
             val homeItems = mutableListOf<SearchResponse>()
-
             val isCategoryUrl = request.data.contains("/dizi-turu/") || request.data.contains("/arsiv")
 
             if (isCategoryUrl && page == 1) {
@@ -162,6 +161,8 @@ class Dizilla : MainAPI() {
                                         ?: item.get("slug")?.asText()
                                         ?: return@forEach
 
+                                    val mediaId = item.get("id")?.asText()?.takeIf { it.isNotBlank() } ?: rawSlug
+
                                     val rawPoster = item.get("poster_url")?.asText()
                                         ?: item.get("face_url")?.asText()
                                         ?: item.get("square_url")?.asText()
@@ -169,11 +170,12 @@ class Dizilla : MainAPI() {
 
                                     val poster = fixPosterUrl(rawPoster) ?: return@forEach
 
-                                    val cleanSlug = rawSlug.removePrefix("/").removeSuffix("/")
-                                    if (cleanSlug.isNotEmpty()) {
-                                        if (seenSlugs.contains(cleanSlug)) return@forEach
-                                        seenSlugs.add(cleanSlug)
-                                    }
+                                    val cleanSlug = rawSlug.removePrefix("/").removeSuffix("/").lowercase()
+                                    val cleanId = mediaId.lowercase()
+
+                                    if (seenMediaIds.contains(cleanId) || seenMediaIds.contains(cleanSlug)) return@forEach
+                                    seenMediaIds.add(cleanId)
+                                    if (cleanSlug.isNotEmpty()) seenMediaIds.add(cleanSlug)
 
                                     homeItems.add(
                                         newTvSeriesSearchResponse(title, fixUrl(rawSlug), TvType.TvSeries) {
@@ -186,8 +188,113 @@ class Dizilla : MainAPI() {
                         }
                     }
                 }
+
+                // Çakışma nedeniyle içerik sayısı 12'den az kaldıysa 2., 3., vb. sayfaları tara
+                val catSlug = request.data.substringAfter("/dizi-turu/").substringBefore("?").trim('/')
+                val catId = categoryMap[catSlug]
+
+                if (homeItems.size < 12 && catId != null) {
+                    var currPage = 2
+                    while (homeItems.size < 12 && currPage <= 5) {
+                        val apiUrl = "${mainUrl}/api/bg/findSeries?releaseYearStart=1900&releaseYearEnd=2030&imdbPointMin=0&imdbPointMax=10&categoryIdsComma=$catId&countryIdsComma=&orderType=date_desc&languageId=-1&currentPage=$currPage&currentPageCount=24&queryStr=&categorySlugsComma=&countryCodesComma="
+
+                        val apiResponse = app.post(
+                            apiUrl,
+                            headers = mapOf(
+                                "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:137.0) Gecko/20100101 Firefox/137.0",
+                                "Accept" to "application/json, text/plain, */*",
+                                "X-Requested-With" to "XMLHttpRequest",
+                                "Content-Type" to "application/x-www-form-urlencoded; charset=UTF-8",
+                                "Origin" to mainUrl,
+                                "Referer" to request.data
+                            ),
+                            data = mapOf("page" to currPage.toString())
+                        )
+
+                        val responseBody = apiResponse.body.string()
+                        val jsonResponse = objectMapper.readTree(responseBody)
+                        val success = jsonResponse.get("success")?.asBoolean() ?: false
+
+                        if (success) {
+                            val encryptedData = jsonResponse.get("response")?.asText()
+                            if (!encryptedData.isNullOrEmpty()) {
+                                val decodedData = decryptDizillaResponse(encryptedData)
+                                if (!decodedData.isNullOrEmpty()) {
+                                    val resultStart = decodedData.indexOf("\"result\":[")
+                                    if (resultStart != -1) {
+                                        var bracketCount = 0
+                                        var resultEnd = resultStart
+                                        var inString = false
+
+                                        for (i in resultStart until decodedData.length) {
+                                            val c = decodedData[i]
+                                            if (c == '"' && (i == 0 || decodedData[i-1] != '\\')) {
+                                                inString = !inString
+                                            }
+                                            if (!inString) {
+                                                when (c) {
+                                                    '[' -> bracketCount++
+                                                    ']' -> {
+                                                        bracketCount--
+                                                        if (bracketCount == 0) {
+                                                            resultEnd = i
+                                                            break
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+
+                                        if (bracketCount == 0) {
+                                            val resultArrayJson = decodedData.substring(resultStart + 9, resultEnd + 1)
+                                            val resultArray = objectMapper.readTree(resultArrayJson)
+
+                                            if (resultArray.isArray) {
+                                                for (item in resultArray) {
+                                                    val title = item.get("original_title")?.asText()?.takeIf { it.isNotBlank() }
+                                                        ?: item.get("culture_title")?.asText()?.takeIf { it.isNotBlank() }
+                                                        ?: item.get("title")?.asText()?.takeIf { it.isNotBlank() }
+                                                        ?: continue
+
+                                                    val rawPoster = item.get("poster_url")?.asText()
+                                                        ?: item.get("square_url")?.asText()
+                                                        ?: item.get("face_url")?.asText()
+                                                        ?: item.get("back_url")?.asText()
+
+                                                    val poster = fixPosterUrl(rawPoster) ?: continue
+
+                                                    val rawSlug = Regex(""""serie_site_id":0,.*?"used_slug":"(.*?)"""").find(item.toString())?.groupValues?.get(1)
+                                                        ?: item.get("used_slug")?.asText()
+                                                        ?: ""
+
+                                                    val mediaId = item.get("id")?.asText()?.takeIf { it.isNotBlank() } ?: rawSlug
+                                                    val cleanSlug = rawSlug.removePrefix("/").removeSuffix("/").lowercase()
+                                                    val cleanId = mediaId.lowercase()
+
+                                                    if (seenMediaIds.contains(cleanId) || seenMediaIds.contains(cleanSlug)) continue
+                                                    seenMediaIds.add(cleanId)
+                                                    if (cleanSlug.isNotEmpty()) seenMediaIds.add(cleanSlug)
+
+                                                    homeItems.add(
+                                                        newTvSeriesSearchResponse(title, fixUrl(rawSlug), TvType.TvSeries) {
+                                                            this.posterUrl = poster
+                                                            this.posterHeaders = baseHeaders
+                                                        }
+                                                    )
+
+                                                    if (homeItems.size >= 12) break
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        currPage++
+                    }
+                }
             } else if (isCategoryUrl && page > 1) {
-                // Sayfa 2+ için API findSeries kullan
+                // Sayfa 2+ istemciden doğrudan geliyorsa API findSeries kullan
                 val catSlug = request.data.substringAfter("/dizi-turu/").substringBefore("?").trim('/')
                 val catId = categoryMap[catSlug]
 
@@ -263,11 +370,13 @@ class Dizilla : MainAPI() {
                                                     ?: item.get("used_slug")?.asText()
                                                     ?: ""
 
-                                                val cleanSlug = rawSlug.removePrefix("/").removeSuffix("/")
-                                                if (cleanSlug.isNotEmpty()) {
-                                                    if (seenSlugs.contains(cleanSlug)) return@forEach
-                                                    seenSlugs.add(cleanSlug)
-                                                }
+                                                val mediaId = item.get("id")?.asText()?.takeIf { it.isNotBlank() } ?: rawSlug
+                                                val cleanSlug = rawSlug.removePrefix("/").removeSuffix("/").lowercase()
+                                                val cleanId = mediaId.lowercase()
+
+                                                if (seenMediaIds.contains(cleanId) || seenMediaIds.contains(cleanSlug)) return@forEach
+                                                seenMediaIds.add(cleanId)
+                                                if (cleanSlug.isNotEmpty()) seenMediaIds.add(cleanSlug)
 
                                                 homeItems.add(
                                                     newTvSeriesSearchResponse(title, fixUrl(rawSlug), TvType.TvSeries) {
@@ -313,6 +422,8 @@ class Dizilla : MainAPI() {
                                         ?: item.get("slug")?.asText()
                                         ?: return@forEach
 
+                                    val mediaId = item.get("id")?.asText()?.takeIf { it.isNotBlank() } ?: rawSlug
+
                                     val rawPoster = item.get("poster_url")?.asText()
                                         ?: item.get("face_url")?.asText()
                                         ?: item.get("square_url")?.asText()
@@ -320,11 +431,12 @@ class Dizilla : MainAPI() {
 
                                     val poster = fixPosterUrl(rawPoster) ?: return@forEach
 
-                                    val cleanSlug = rawSlug.removePrefix("/").removeSuffix("/")
-                                    if (cleanSlug.isNotEmpty()) {
-                                        if (seenSlugs.contains(cleanSlug)) return@forEach
-                                        seenSlugs.add(cleanSlug)
-                                    }
+                                    val cleanSlug = rawSlug.removePrefix("/").removeSuffix("/").lowercase()
+                                    val cleanId = mediaId.lowercase()
+
+                                    if (seenMediaIds.contains(cleanId) || seenMediaIds.contains(cleanSlug)) return@forEach
+                                    seenMediaIds.add(cleanId)
+                                    if (cleanSlug.isNotEmpty()) seenMediaIds.add(cleanSlug)
 
                                     homeItems.add(
                                         newTvSeriesSearchResponse(title, fixUrl(rawSlug), TvType.TvSeries) {
@@ -345,9 +457,9 @@ class Dizilla : MainAPI() {
                         document.select("div.col-span-3 a").mapNotNull { it.sonBolumler() }
                     }
                     htmlItems.forEach { item ->
-                        val cleanSlug = item.url.removePrefix(mainUrl).removePrefix("/").removeSuffix("/")
-                        if (cleanSlug.isNotEmpty() && !seenSlugs.contains(cleanSlug) && !item.posterUrl.isNullOrBlank()) {
-                            seenSlugs.add(cleanSlug)
+                        val cleanSlug = item.url.removePrefix(mainUrl).removePrefix("/").removeSuffix("/").lowercase()
+                        if (cleanSlug.isNotEmpty() && !seenMediaIds.contains(cleanSlug) && !item.posterUrl.isNullOrBlank()) {
+                            seenMediaIds.add(cleanSlug)
                             homeItems.add(item)
                         }
                     }
